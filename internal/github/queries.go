@@ -66,14 +66,6 @@ mutation ApprovePR($id: ID!) {
 }
 `
 
-const addLabelMutation = `
-mutation AddLabel($labelableId: ID!, $labelIds: [ID!]!) {
-  addLabelsToLabelable(input: { labelableId: $labelableId, labelIds: $labelIds }) {
-    labelable { ... on PullRequest { number } }
-  }
-}
-`
-
 const rerequestCheckSuiteMutation = `
 mutation RerequestCheckSuite($checkSuiteId: ID!, $repositoryId: ID!) {
   rerequestCheckSuite(input: { checkSuiteId: $checkSuiteId, repositoryId: $repositoryId }) {

@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"os/exec"
 	"runtime"
 
@@ -10,13 +11,14 @@ import (
 func openBrowserCmd(url string) tea.Cmd {
 	return func() tea.Msg {
 		var cmd *exec.Cmd
+		ctx := context.Background()
 		switch runtime.GOOS {
 		case "darwin":
-			cmd = exec.Command("open", url)
+			cmd = exec.CommandContext(ctx, "open", url)
 		case "windows":
-			cmd = exec.Command("rundll32", "url.dll,FileProtocolHandler", url)
+			cmd = exec.CommandContext(ctx, "rundll32", "url.dll,FileProtocolHandler", url)
 		default:
-			cmd = exec.Command("xdg-open", url)
+			cmd = exec.CommandContext(ctx, "xdg-open", url)
 		}
 		_ = cmd.Start()
 		return nil

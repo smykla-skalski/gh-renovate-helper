@@ -10,6 +10,19 @@ import (
 	"github.com/klaudiush/gh-renovate-tracker/internal/config"
 )
 
+const (
+	statusFailure       = "FAILURE"
+	statusSuccess       = "SUCCESS"
+	statusPending       = "PENDING"
+	statusApproved      = "APPROVED"
+	statusChanges       = "CHANGES_REQUESTED"
+	statusReviewReq     = "REVIEW_REQUIRED"
+	checkCompleted      = "COMPLETED"
+	conclusionTimedOut  = "TIMED_OUT"
+	conclusionCancelled = "CANCELLED"
+	stateError          = "ERROR"
+)
+
 type Client struct {
 	gql *gogh.GraphQLClient
 }
@@ -22,7 +35,6 @@ func NewClient() (*Client, error) {
 	return &Client{gql: gql}, nil
 }
 
-// FetchPRs fetches all Renovate PRs for the configured orgs and repos.
 func (c *Client) FetchPRs(cfg *config.Config) ([]PR, error) {
 	if len(cfg.Orgs) == 0 && len(cfg.Repos) == 0 {
 		return nil, fmt.Errorf("no orgs or repos configured")
@@ -40,37 +52,36 @@ func (c *Client) FetchPRs(cfg *config.Config) ([]PR, error) {
 		if !ok {
 			continue
 		}
-		for _, node := range res.Nodes {
-			prs = append(prs, convertNode(node))
+		for i := range res.Nodes {
+			prs = append(prs, convertNode(&res.Nodes[i]))
 		}
 	}
 	return prs, nil
 }
 
-func buildSearchQuery(cfg *config.Config) (string, []string) {
+func buildSearchQuery(cfg *config.Config) (query string, aliases []string) {
 	var sb strings.Builder
 	sb.WriteString("query {\n")
-	var aliases []string
 
 	for i, org := range cfg.Orgs {
 		alias := fmt.Sprintf("org%d", i)
 		aliases = append(aliases, alias)
 		q := fmt.Sprintf("org:%s author:%s is:pr is:open", org, cfg.Author)
-		sb.WriteString(fmt.Sprintf("  %s: search(query: %q, type: ISSUE, first: 100) { ...prFields }\n", alias, q))
+		fmt.Fprintf(&sb, "  %s: search(query: %q, type: ISSUE, first: 100) { ...prFields }\n", alias, q)
 	}
 	for i, repo := range cfg.Repos {
 		alias := fmt.Sprintf("repo%d", i)
 		aliases = append(aliases, alias)
 		q := fmt.Sprintf("repo:%s author:%s is:pr is:open", repo, cfg.Author)
-		sb.WriteString(fmt.Sprintf("  %s: search(query: %q, type: ISSUE, first: 100) { ...prFields }\n", alias, q))
+		fmt.Fprintf(&sb, "  %s: search(query: %q, type: ISSUE, first: 100) { ...prFields }\n", alias, q)
 	}
 
 	sb.WriteString("}\n")
 	sb.WriteString(prFragment)
-	return sb.String(), aliases
+	query = sb.String()
+	return query, aliases
 }
 
-// MergePR merges a PR with the configured merge method.
 func (c *Client) MergePR(prID, mergeMethod string) error {
 	method := strings.ToUpper(mergeMethod)
 	var result map[string]interface{}
@@ -78,14 +89,12 @@ func (c *Client) MergePR(prID, mergeMethod string) error {
 	return c.gql.Do(mergeMutation, vars, &result)
 }
 
-// ApprovePR approves a PR.
 func (c *Client) ApprovePR(prID string) error {
 	var result map[string]interface{}
 	vars := map[string]interface{}{"id": prID}
 	return c.gql.Do(approveMutation, vars, &result)
 }
 
-// RerunChecks rerequests all failed check suites for a PR.
 func (c *Client) RerunChecks(repoOwner, repoName string, suiteIDs []string) error {
 	repoID, err := c.fetchRepoID(repoOwner, repoName)
 	if err != nil {
@@ -117,38 +126,34 @@ type searchResult struct {
 }
 
 type prNode struct {
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
 	ID             string
-	Number         int
+	Repository     struct{ NameWithOwner string }
 	Title          string
 	URL            string
 	State          string
 	Mergeable      string
-	Repository     struct{ NameWithOwner string }
 	ReviewDecision string
-	Commits        struct {
-		Nodes []struct {
-			Commit struct {
-				StatusCheckRollup *struct {
-					Contexts struct {
-						Nodes []checkContext
-					}
-				}
-			}
-		}
-	}
-	Reviews struct {
+	Labels         struct{ Nodes []struct{ Name string } }
+	Reviews        struct {
 		Nodes []struct {
 			Author struct{ Login string }
 			State  string
 		}
 	}
-	Labels struct {
-		Nodes []struct{ Name string }
+	Commits struct {
+		Nodes []struct {
+			Commit struct {
+				StatusCheckRollup *struct {
+					Contexts struct{ Nodes []checkContext }
+				}
+			}
+		}
 	}
+	Number    int
 	Additions int
 	Deletions int
-	CreatedAt time.Time
-	UpdatedAt time.Time
 }
 
 type checkContext struct {
@@ -160,7 +165,7 @@ type checkContext struct {
 	State      string
 }
 
-func convertNode(n prNode) PR {
+func convertNode(n *prNode) PR {
 	pr := PR{
 		ID:        n.ID,
 		Number:    n.Number,
@@ -176,30 +181,31 @@ func convertNode(n prNode) PR {
 	}
 
 	switch n.ReviewDecision {
-	case "APPROVED":
-		pr.ReviewStatus = "APPROVED"
-	case "CHANGES_REQUESTED":
-		pr.ReviewStatus = "CHANGES_REQUESTED"
-	case "REVIEW_REQUIRED":
-		pr.ReviewStatus = "REVIEW_REQUIRED"
+	case statusApproved:
+		pr.ReviewStatus = statusApproved
+	case statusChanges:
+		pr.ReviewStatus = statusChanges
+	case statusReviewReq:
+		pr.ReviewStatus = statusReviewReq
 	}
 
-	for _, r := range n.Reviews.Nodes {
+	for i := range n.Reviews.Nodes {
 		pr.Reviews = append(pr.Reviews, Review{
-			Author: r.Author.Login,
-			State:  r.State,
+			Author: n.Reviews.Nodes[i].Author.Login,
+			State:  n.Reviews.Nodes[i].State,
 		})
 	}
 
-	for _, l := range n.Labels.Nodes {
-		pr.Labels = append(pr.Labels, l.Name)
+	for i := range n.Labels.Nodes {
+		pr.Labels = append(pr.Labels, n.Labels.Nodes[i].Name)
 	}
 
 	if len(n.Commits.Nodes) > 0 {
 		commit := n.Commits.Nodes[0].Commit
 		if commit.StatusCheckRollup != nil {
 			pending, failed, total := 0, 0, 0
-			for _, ctx := range commit.StatusCheckRollup.Contexts.Nodes {
+			for i := range commit.StatusCheckRollup.Contexts.Nodes {
+				ctx := &commit.StatusCheckRollup.Contexts.Nodes[i]
 				if ctx.Name != "" {
 					total++
 					cr := CheckRun{
@@ -210,16 +216,16 @@ func convertNode(n prNode) PR {
 					}
 					pr.Checks = append(pr.Checks, cr)
 					switch {
-					case ctx.Status != "COMPLETED":
+					case ctx.Status != checkCompleted:
 						pending++
-					case ctx.Conclusion == "FAILURE" || ctx.Conclusion == "TIMED_OUT" || ctx.Conclusion == "CANCELLED":
+					case ctx.Conclusion == statusFailure || ctx.Conclusion == conclusionTimedOut || ctx.Conclusion == conclusionCancelled:
 						failed++
 					}
 				} else if ctx.Context != "" {
 					total++
-					cr := CheckRun{Name: ctx.Context, Status: "COMPLETED", Conclusion: ctx.State}
+					cr := CheckRun{Name: ctx.Context, Status: checkCompleted, Conclusion: ctx.State}
 					pr.Checks = append(pr.Checks, cr)
-					if ctx.State == "FAILURE" || ctx.State == "ERROR" {
+					if ctx.State == statusFailure || ctx.State == stateError {
 						failed++
 					}
 				}
@@ -228,11 +234,11 @@ func convertNode(n prNode) PR {
 			case total == 0:
 				pr.CheckStatus = ""
 			case failed > 0:
-				pr.CheckStatus = "FAILURE"
+				pr.CheckStatus = statusFailure
 			case pending > 0:
-				pr.CheckStatus = "PENDING"
+				pr.CheckStatus = statusPending
 			default:
-				pr.CheckStatus = "SUCCESS"
+				pr.CheckStatus = statusSuccess
 			}
 		}
 	}

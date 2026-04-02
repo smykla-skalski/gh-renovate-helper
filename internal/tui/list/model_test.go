@@ -123,18 +123,6 @@ func TestTruncate(t *testing.T) {
 	}
 }
 
-func TestMax(t *testing.T) {
-	if max(3, 5) != 5 {
-		t.Error("max(3,5) != 5")
-	}
-	if max(5, 3) != 5 {
-		t.Error("max(5,3) != 5")
-	}
-	if max(0, 0) != 0 {
-		t.Error("max(0,0) != 0")
-	}
-}
-
 func TestPrAge(t *testing.T) {
 	if got := prAge(time.Now().Add(-30 * time.Minute)); !strings.HasSuffix(got, "m") {
 		t.Errorf("30min ago = %q, want suffix m", got)

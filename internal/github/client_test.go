@@ -69,7 +69,7 @@ func TestConvertNode_ReviewDecision(t *testing.T) {
 	}
 	for _, tc := range cases {
 		n := prNode{ReviewDecision: tc.decision}
-		pr := convertNode(n)
+		pr := convertNode(&n)
 		if pr.ReviewStatus != tc.want {
 			t.Errorf("decision %q: ReviewStatus = %q, want %q", tc.decision, pr.ReviewStatus, tc.want)
 		}
@@ -107,7 +107,7 @@ func TestConvertNode_CheckStatus(t *testing.T) {
 	}
 	for _, tc := range cases {
 		n := makeCheckNode(tc.status, tc.conclusion)
-		pr := convertNode(n)
+		pr := convertNode(&n)
 		if pr.CheckStatus != tc.want {
 			t.Errorf("status=%q conclusion=%q: CheckStatus = %q, want %q",
 				tc.status, tc.conclusion, pr.CheckStatus, tc.want)
@@ -118,7 +118,7 @@ func TestConvertNode_CheckStatus(t *testing.T) {
 func TestConvertNode_Labels(t *testing.T) {
 	var n prNode
 	n.Labels.Nodes = []struct{ Name string }{{Name: "automerge"}, {Name: "renovate"}}
-	pr := convertNode(n)
+	pr := convertNode(&n)
 	if len(pr.Labels) != 2 || pr.Labels[0] != "automerge" {
 		t.Errorf("Labels = %v", pr.Labels)
 	}
@@ -139,7 +139,7 @@ func TestConvertNode_Fields(t *testing.T) {
 	}
 	n.Repository.NameWithOwner = "org/repo"
 
-	pr := convertNode(n)
+	pr := convertNode(&n)
 	if pr.ID != "PR_id1" {
 		t.Errorf("ID = %q", pr.ID)
 	}

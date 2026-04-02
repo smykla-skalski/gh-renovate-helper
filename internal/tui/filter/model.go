@@ -19,12 +19,9 @@ func New() Model {
 }
 
 func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
-	switch msg := msg.(type) {
-	case tea.KeyMsg:
-		if msg.String() == "enter" {
-			m.done = true
-			return m, nil
-		}
+	if msg, ok := msg.(tea.KeyMsg); ok && msg.String() == "enter" {
+		m.done = true
+		return m, nil
 	}
 	var cmd tea.Cmd
 	m.input, cmd = m.input.Update(msg)

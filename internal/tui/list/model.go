@@ -20,17 +20,32 @@ const (
 	sortByRepo
 )
 
-// Model is the PR list view.
+const (
+	statusFailure  = "FAILURE"
+	statusSuccess  = "SUCCESS"
+	statusPending  = "PENDING"
+	statusApproved = "APPROVED"
+
+	mergeConflicting    = "CONFLICTING"
+	reviewChanges       = "CHANGES_REQUESTED"
+	reviewRequired      = "REVIEW_REQUIRED"
+	checkCompleted      = "COMPLETED"
+	conclusionTimedOut  = "TIMED_OUT"
+	conclusionCancelled = "CANCELLED"
+	conclusionNeutral   = "NEUTRAL"
+	conclusionSkipped   = "SKIPPED"
+)
+
 type Model struct {
+	selected map[int]bool
+	filter   string
 	prs      []github.PR
 	filtered []github.PR
 	cursor   int
-	selected map[int]bool
-	filter   string
-	sort     sortMode
-	grouped  bool
 	width    int
 	height   int
+	sort     sortMode
+	grouped  bool
 }
 
 func New() Model {
@@ -69,8 +84,7 @@ func (m Model) Selected() (github.PR, bool) {
 }
 
 func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
-	switch msg := msg.(type) {
-	case tea.KeyMsg:
+	if msg, ok := msg.(tea.KeyMsg); ok {
 		switch {
 		case key.Matches(msg, upKey):
 			if m.cursor > 0 {
@@ -165,17 +179,17 @@ func (m Model) renderRow(i int) string {
 
 func prStatus(pr github.PR) string {
 	switch {
-	case pr.Mergeable == "CONFLICTING":
+	case pr.Mergeable == mergeConflicting:
 		return styleConflict.Render("✗ Conflict")
-	case pr.CheckStatus == "FAILURE":
+	case pr.CheckStatus == statusFailure:
 		return styleFailed.Render("✗ Checks")
-	case pr.ReviewStatus == "CHANGES_REQUESTED":
+	case pr.ReviewStatus == reviewChanges:
 		return styleConflict.Render("✗ Changes")
-	case pr.CheckStatus == "PENDING":
+	case pr.CheckStatus == statusPending:
 		return stylePending.Render("◐ Checks")
-	case pr.ReviewStatus == "REVIEW_REQUIRED":
+	case pr.ReviewStatus == reviewRequired:
 		return stylePending.Render("◐ Review")
-	case pr.ReviewStatus == "APPROVED" && pr.CheckStatus == "SUCCESS":
+	case pr.ReviewStatus == statusApproved && pr.CheckStatus == statusSuccess:
 		return styleReady.Render("✓ Ready")
 	default:
 		return styleDim.Render("~ Pending")
@@ -188,8 +202,9 @@ func prChecks(pr github.PR) string {
 		return styleDim.Render("-")
 	}
 	passed := 0
-	for _, c := range pr.Checks {
-		if c.Conclusion == "SUCCESS" || c.Conclusion == "NEUTRAL" || c.Conclusion == "SKIPPED" {
+	for i := range pr.Checks {
+		c := pr.Checks[i].Conclusion
+		if c == statusSuccess || c == conclusionNeutral || c == conclusionSkipped {
 			passed++
 		}
 	}
@@ -223,13 +238,6 @@ func truncate(s string, n int) string {
 	return s[:n-1] + "…"
 }
 
-func max(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
-}
-
 func applyFilter(prs []github.PR, f string) []github.PR {
 	if f == "" {
 		out := make([]github.PR, len(prs))
@@ -238,11 +246,11 @@ func applyFilter(prs []github.PR, f string) []github.PR {
 	}
 	f = strings.ToLower(f)
 	var out []github.PR
-	for _, pr := range prs {
-		if strings.Contains(strings.ToLower(pr.Repo), f) ||
-			strings.Contains(strings.ToLower(pr.Title), f) ||
-			strings.Contains(strings.ToLower(pr.ReviewStatus), f) {
-			out = append(out, pr)
+	for i := range prs {
+		if strings.Contains(strings.ToLower(prs[i].Repo), f) ||
+			strings.Contains(strings.ToLower(prs[i].Title), f) ||
+			strings.Contains(strings.ToLower(prs[i].ReviewStatus), f) {
+			out = append(out, prs[i])
 		}
 	}
 	return out
@@ -258,26 +266,27 @@ func sortPRs(prs []github.PR, mode sortMode) {
 
 func less(a, b github.PR, mode sortMode) bool {
 	switch mode {
+	case sortByStatus:
+		return statusWeight(a) < statusWeight(b)
 	case sortByAge:
 		return a.CreatedAt.After(b.CreatedAt)
 	case sortByRepo:
 		return a.Repo < b.Repo
-	default:
-		return statusWeight(a) < statusWeight(b)
 	}
+	return statusWeight(a) < statusWeight(b)
 }
 
 func statusWeight(pr github.PR) int {
 	switch {
-	case pr.ReviewStatus == "APPROVED" && pr.CheckStatus == "SUCCESS":
+	case pr.ReviewStatus == statusApproved && pr.CheckStatus == statusSuccess:
 		return 0
-	case pr.CheckStatus == "PENDING":
+	case pr.CheckStatus == statusPending:
 		return 1
-	case pr.ReviewStatus == "REVIEW_REQUIRED":
+	case pr.ReviewStatus == reviewRequired:
 		return 2
-	case pr.CheckStatus == "FAILURE":
+	case pr.CheckStatus == statusFailure:
 		return 3
-	case pr.Mergeable == "CONFLICTING":
+	case pr.Mergeable == mergeConflicting:
 		return 4
 	default:
 		return 5

@@ -7,14 +7,16 @@ import (
 	"time"
 )
 
+const defaultAuthor = "renovate[bot]"
+
 func TestDefaults(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	cfg, err := Load()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Author != "renovate[bot]" {
-		t.Errorf("Author = %q, want %q", cfg.Author, "renovate[bot]")
+	if cfg.Author != defaultAuthor {
+		t.Errorf("Author = %q, want %q", cfg.Author, defaultAuthor)
 	}
 	if cfg.MergeMethod != "squash" {
 		t.Errorf("MergeMethod = %q, want %q", cfg.MergeMethod, "squash")
@@ -79,7 +81,7 @@ func TestEmptyAuthorFallsBackToDefault(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Author != "renovate[bot]" {
+	if cfg.Author != defaultAuthor {
 		t.Errorf("Author = %q, want renovate[bot]", cfg.Author)
 	}
 }

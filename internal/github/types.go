@@ -3,20 +3,20 @@ package github
 import "time"
 
 type PR struct {
-	ID           string
-	Number       int
-	Repo         string // "owner/repo"
-	Title        string
-	URL          string
-	State        string // OPEN, CLOSED, MERGED
-	Mergeable    string // MERGEABLE, CONFLICTING, UNKNOWN
-	ReviewStatus string // APPROVED, CHANGES_REQUESTED, REVIEW_REQUIRED, ""
-	CheckStatus  string // SUCCESS, FAILURE, PENDING, ""
-	Checks       []CheckRun
-	Reviews      []Review
-	Labels       []string
 	CreatedAt    time.Time
 	UpdatedAt    time.Time
+	URL          string
+	State        string
+	CheckStatus  string
+	ID           string
+	Repo         string
+	Title        string
+	ReviewStatus string
+	Mergeable    string
+	Labels       []string
+	Checks       []CheckRun
+	Reviews      []Review
+	Number       int
 	Additions    int
 	Deletions    int
 }

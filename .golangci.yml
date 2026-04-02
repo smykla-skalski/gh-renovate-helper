@@ -5,13 +5,12 @@ linters:
     - errcheck
     - govet
     - staticcheck
-    - gosimple
     - ineffassign
     - unused
     - gocritic
     - revive
     - nolintlint
-    - nilaway
+    - nilnesserr
     - bodyclose
     - contextcheck
     - dupword
@@ -43,7 +42,6 @@ linters:
       enable-all: true
     revive:
       rules:
-        - name: exported
         - name: error-return
         - name: error-strings
         - name: var-naming
@@ -59,9 +57,19 @@ linters:
         - diagnostic
         - style
         - performance
+      disabled-checks:
+        - hugeParam
     nolintlint:
       require-explanation: true
       require-specific: true
+
+  exclusions:
+    rules:
+      - path: _test\.go
+        linters:
+          - forcetypeassert
+          - unparam
+          - gocritic
 
 formatters:
   enable:

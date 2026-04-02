@@ -26,24 +26,33 @@ const (
 	viewHelp
 )
 
+var (
+	styleFailed = lipgloss.NewStyle().Foreground(lipgloss.Color("1"))
+	styleReady  = lipgloss.NewStyle().Foreground(lipgloss.Color("2"))
+	styleDim    = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
+
+	styleStatusBar = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("8")).
+			PaddingTop(1)
+)
+
 type Model struct {
+	help      help.Model
+	lastFetch time.Time
 	client    *github.Client
 	cfg       *config.Config
-	current   view
-	list      list.Model
-	detail    detail.Model
-	filter    filter.Model
-	help      help.Model
-	spinner   spinner.Model
-	loading   bool
 	status    string
-	statusErr bool
-	lastFetch time.Time
+	spinner   spinner.Model
+	filter    filter.Model
+	detail    detail.Model
+	list      list.Model
 	width     int
 	height    int
+	current   view
+	loading   bool
+	statusErr bool
 }
 
-// New creates the root TUI model.
 func New(client *github.Client, cfg *config.Config) Model {
 	s := spinner.New()
 	s.Spinner = spinner.Dot
@@ -135,9 +144,12 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case viewHelp:
 		m.current = viewList
 		return m, nil
+
+	case viewList:
+		// handled below
 	}
 
-	// viewList
+	// viewList.
 	switch {
 	case key.Matches(msg, keys.Quit):
 		return m, tea.Quit
@@ -202,7 +214,7 @@ func (m Model) View() string {
 		body = m.list.View() + "\n" + m.filter.View()
 	case viewHelp:
 		body = m.help.View()
-	default:
+	case viewList:
 		body = m.list.View()
 	}
 
@@ -212,13 +224,14 @@ func (m Model) View() string {
 
 func (m Model) renderStatus() string {
 	var s string
-	if m.loading {
+	switch {
+	case m.loading:
 		s = m.spinner.View() + " loading..."
-	} else if m.statusErr {
+	case m.statusErr:
 		s = styleFailed.Render("✗ " + m.status)
-	} else if m.status != "" {
+	case m.status != "":
 		s = styleReady.Render("✓ " + m.status)
-	} else {
+	default:
 		ago := time.Since(m.lastFetch).Round(time.Second)
 		s = styleDim.Render(fmt.Sprintf("↻ %s ago", ago))
 	}

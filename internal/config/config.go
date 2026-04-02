@@ -9,10 +9,10 @@ import (
 )
 
 type Config struct {
-	Orgs            []string      `yaml:"orgs"`
-	Repos           []string      `yaml:"repos"`
 	Author          string        `yaml:"author"`
 	MergeMethod     string        `yaml:"merge_method"`
+	Orgs            []string      `yaml:"orgs"`
+	Repos           []string      `yaml:"repos"`
 	RefreshInterval time.Duration `yaml:"refresh_interval"`
 }
 
@@ -29,7 +29,7 @@ func Load() (*Config, error) {
 
 	path, err := configPath()
 	if err != nil {
-		return &cfg, nil
+		return nil, err
 	}
 
 	data, err := os.ReadFile(path)

@@ -58,9 +58,9 @@ func main() {
 			fmt.Fprintf(os.Stderr, "fetch error: %v\n", err)
 			os.Exit(1)
 		}
-		for _, pr := range prs {
+		for i := range prs {
 			fmt.Printf("%s #%d %s [%s] [%s]\n",
-				pr.Repo, pr.Number, pr.Title, pr.ReviewStatus, pr.CheckStatus)
+				prs[i].Repo, prs[i].Number, prs[i].Title, prs[i].ReviewStatus, prs[i].CheckStatus)
 		}
 		return
 	}

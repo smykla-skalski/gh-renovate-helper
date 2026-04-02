@@ -10,7 +10,12 @@ import (
 	"github.com/klaudiush/gh-renovate-tracker/internal/github"
 )
 
-// Model shows full PR details.
+const (
+	conclusionSuccess  = "SUCCESS"
+	conclusionFailure  = "FAILURE"
+	conclusionTimedOut = "TIMED_OUT"
+)
+
 type Model struct {
 	pr     github.PR
 	scroll int
@@ -21,8 +26,7 @@ func New(pr github.PR) Model {
 }
 
 func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
-	switch msg := msg.(type) {
-	case tea.KeyMsg:
+	if msg, ok := msg.(tea.KeyMsg); ok {
 		switch msg.String() {
 		case "j", "down":
 			m.scroll++
@@ -39,32 +43,32 @@ func (m Model) View() string {
 	pr := m.pr
 	var b strings.Builder
 
-	b.WriteString(styleBold.Render(pr.Title) + "\n")
-	b.WriteString(styleDim.Render(pr.URL) + "\n\n")
+	fmt.Fprintf(&b, "%s\n", styleBold.Render(pr.Title))
+	fmt.Fprintf(&b, "%s\n\n", styleDim.Render(pr.URL))
 
-	b.WriteString(fmt.Sprintf("Repo:      %s\n", pr.Repo))
-	b.WriteString(fmt.Sprintf("State:     %s\n", pr.State))
-	b.WriteString(fmt.Sprintf("Mergeable: %s\n", pr.Mergeable))
-	b.WriteString(fmt.Sprintf("Review:    %s\n", pr.ReviewStatus))
-	b.WriteString(fmt.Sprintf("+%d / -%d\n\n", pr.Additions, pr.Deletions))
+	fmt.Fprintf(&b, "Repo:      %s\n", pr.Repo)
+	fmt.Fprintf(&b, "State:     %s\n", pr.State)
+	fmt.Fprintf(&b, "Mergeable: %s\n", pr.Mergeable)
+	fmt.Fprintf(&b, "Review:    %s\n", pr.ReviewStatus)
+	fmt.Fprintf(&b, "+%d / -%d\n\n", pr.Additions, pr.Deletions)
 
 	if len(pr.Labels) > 0 {
-		b.WriteString("Labels: " + strings.Join(pr.Labels, ", ") + "\n\n")
+		fmt.Fprintf(&b, "Labels: %s\n\n", strings.Join(pr.Labels, ", "))
 	}
 
 	if len(pr.Checks) > 0 {
-		b.WriteString(styleBold.Render("Checks:") + "\n")
-		for _, c := range pr.Checks {
-			icon := checkIcon(c)
-			b.WriteString(fmt.Sprintf("  %s %s\n", icon, c.Name))
+		fmt.Fprintf(&b, "%s\n", styleBold.Render("Checks:"))
+		for i := range pr.Checks {
+			icon := checkIcon(pr.Checks[i])
+			fmt.Fprintf(&b, "  %s %s\n", icon, pr.Checks[i].Name)
 		}
-		b.WriteString("\n")
+		fmt.Fprintf(&b, "\n")
 	}
 
 	if len(pr.Reviews) > 0 {
-		b.WriteString(styleBold.Render("Reviews:") + "\n")
-		for _, r := range pr.Reviews {
-			b.WriteString(fmt.Sprintf("  %s: %s\n", r.Author, r.State))
+		fmt.Fprintf(&b, "%s\n", styleBold.Render("Reviews:"))
+		for i := range pr.Reviews {
+			fmt.Fprintf(&b, "  %s: %s\n", pr.Reviews[i].Author, pr.Reviews[i].State)
 		}
 	}
 
@@ -73,9 +77,9 @@ func (m Model) View() string {
 
 func checkIcon(c github.CheckRun) string {
 	switch c.Conclusion {
-	case "SUCCESS":
+	case conclusionSuccess:
 		return styleReady.Render("✓")
-	case "FAILURE", "TIMED_OUT":
+	case conclusionFailure, conclusionTimedOut:
 		return styleFailed.Render("✗")
 	default:
 		return stylePending.Render("◐")
