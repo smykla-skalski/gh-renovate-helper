@@ -6,7 +6,7 @@ import (
 	"os"
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/klaudiush/gh-renovate-tracker/internal/config"
 	"github.com/klaudiush/gh-renovate-tracker/internal/github"
@@ -65,11 +65,7 @@ func main() {
 		return
 	}
 
-	p := tea.NewProgram(
-		tui.New(client, cfg),
-		tea.WithAltScreen(),
-		tea.WithMouseCellMotion(),
-	)
+	p := tea.NewProgram(tui.New(client, cfg))
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "tui error: %v\n", err)
 		os.Exit(1)
