@@ -13,6 +13,7 @@ type Config struct {
 	MergeMethod     string        `yaml:"merge_method"`
 	Orgs            []string      `yaml:"orgs"`
 	Repos           []string      `yaml:"repos"`
+	ExcludeRepos    []string      `yaml:"exclude_repos"`
 	RefreshInterval time.Duration `yaml:"refresh_interval"`
 }
 

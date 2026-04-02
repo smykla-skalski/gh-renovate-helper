@@ -85,3 +85,32 @@ func TestEmptyAuthorFallsBackToDefault(t *testing.T) {
 		t.Errorf("Author = %q, want renovate[bot]", cfg.Author)
 	}
 }
+
+func TestExcludeRepos(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	dir := filepath.Join(home, ".config", "gh-renovate-tracker")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	yaml := `
+orgs:
+  - kumahq
+exclude_repos:
+  - kumahq/kuma-website
+  - kumahq/kuma-gui
+`
+	if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(yaml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.ExcludeRepos) != 2 {
+		t.Fatalf("ExcludeRepos len = %d, want 2", len(cfg.ExcludeRepos))
+	}
+	if cfg.ExcludeRepos[0] != "kumahq/kuma-website" {
+		t.Errorf("ExcludeRepos[0] = %q", cfg.ExcludeRepos[0])
+	}
+}

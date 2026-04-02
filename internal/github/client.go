@@ -46,6 +46,11 @@ func (c *Client) FetchPRs(cfg *config.Config) ([]PR, error) {
 		return nil, err
 	}
 
+	excluded := make(map[string]bool, len(cfg.ExcludeRepos))
+	for _, r := range cfg.ExcludeRepos {
+		excluded[r] = true
+	}
+
 	var prs []PR
 	for _, alias := range aliases {
 		res, ok := result[alias]
@@ -53,7 +58,11 @@ func (c *Client) FetchPRs(cfg *config.Config) ([]PR, error) {
 			continue
 		}
 		for i := range res.Nodes {
-			prs = append(prs, convertNode(&res.Nodes[i]))
+			pr := convertNode(&res.Nodes[i])
+			if excluded[pr.Repo] {
+				continue
+			}
+			prs = append(prs, pr)
 		}
 	}
 	return prs, nil
