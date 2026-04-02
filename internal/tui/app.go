@@ -47,16 +47,16 @@ var (
 
 type Model struct {
 	help       help.Model
+	client     *github.Client
 	cfg        *config.Config
 	pendingCmd tea.Cmd
-	client     *github.Client
 	status     string
 	labelInput textinput.Model
 	spinner    spinner.Model
 	filter     filter.Model
 	labelPR    github.PR
-	detail     detail.Model
 	list       list.Model
+	detail     detail.Model
 	lastFetch  int64
 	width      int
 	height     int
