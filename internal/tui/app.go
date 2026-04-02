@@ -112,6 +112,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			var cmd tea.Cmd
 			m.detail, cmd = m.detail.Update(msg)
 			return m, cmd
+		case viewFilter, viewHelp, viewLabel:
+			// no scroll in these views
 		}
 
 	case prsLoadedMsg:
