@@ -46,25 +46,26 @@ var (
 )
 
 type Model struct {
-	statusUntil time.Time
-	help        help.Model
-	client      *github.Client
-	cfg         *config.Config
-	pendingCmd  tea.Cmd
-	status      string
-	labelInput  textinput.Model
-	spinner     spinner.Model
-	filter      filter.Model
-	labelPR     github.PR
-	list        list.Model
-	detail      detail.Model
-	lastFetch   int64
-	width       int
-	height      int
-	current     view
-	loading     bool
-	statusErr   bool
-	confirming  bool
+	statusUntil   time.Time
+	help          help.Model
+	client        *github.Client
+	cfg           *config.Config
+	pendingCmd    tea.Cmd
+	status        string
+	labelInput    textinput.Model
+	spinner       spinner.Model
+	filter        filter.Model
+	labelPR       github.PR
+	list          list.Model
+	detail        detail.Model
+	lastFetch     int64
+	width         int
+	height        int
+	current       view
+	loading       bool
+	statusErr     bool
+	confirming    bool
+	confirmDanger bool
 }
 
 func New(client *github.Client, cfg *config.Config) Model {
@@ -157,6 +158,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.statusErr = false
 		m.statusUntil = time.Now().Add(3 * time.Second)
 		return m, nil
+
+	case autoModeDoneMsg:
+		m.status = fmt.Sprintf("auto: approved %d, merged %d PRs", msg.approved, msg.merged)
+		m.statusErr = false
+		m.statusUntil = time.Now().Add(5 * time.Second)
+		return m, fetchPRsCmd(m.client, m.cfg)
 
 	case actionDoneMsg:
 		m.status = msg.msg
@@ -320,6 +327,20 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case key.Matches(msg, keys.Auto):
+		toApprove := m.list.AutoApprovablePRs()
+		toMerge := m.list.AutoMergeablePRs()
+		total := len(toApprove) + len(toMerge)
+		if total == 0 {
+			m.status = "no PRs eligible for auto mode"
+			return m, nil
+		}
+		return m.startDangerConfirm(
+			fmt.Sprintf("Will approve %d and merge %d PRs without review. Proceed? (y/n)",
+				len(toApprove), len(toApprove)+len(toMerge)),
+			autoModeCmd(m.client, toApprove, toMerge, m.cfg.MergeMethod),
+		), nil
+
 	case key.Matches(msg, keys.Label):
 		if pr, ok := m.list.Selected(); ok {
 			ti := textinput.New()
@@ -346,16 +367,24 @@ func (m Model) startConfirm(msg string, cmd tea.Cmd) Model {
 	return m
 }
 
+func (m Model) startDangerConfirm(msg string, cmd tea.Cmd) Model {
+	m = m.startConfirm(msg, cmd)
+	m.confirmDanger = true
+	return m
+}
+
 func (m Model) handleConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "y", "Y":
 		cmd := m.pendingCmd
 		m.confirming = false
+		m.confirmDanger = false
 		m.pendingCmd = nil
 		m.status = ""
 		return m, cmd
 	default:
 		m.confirming = false
+		m.confirmDanger = false
 		m.pendingCmd = nil
 		m.status = "cancelled"
 		return m, nil
@@ -426,7 +455,14 @@ func (m Model) renderLoadingPopup() string {
 }
 
 func (m Model) renderPopup() string {
-	title := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("3")).Render("Confirm")
+	color := lipgloss.Color("3")
+	titleText := "Confirm"
+	if m.confirmDanger {
+		color = lipgloss.Color("1")
+		titleText = "⚠ WARNING"
+	}
+
+	title := lipgloss.NewStyle().Bold(true).Foreground(color).Render(titleText)
 	msg := m.status
 	hint := styleDim.Render("y to confirm · any key to cancel")
 
@@ -434,7 +470,7 @@ func (m Model) renderPopup() string {
 
 	box := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("3")).
+		BorderForeground(color).
 		Padding(1, 3).
 		Render(inner)
 
@@ -459,6 +495,7 @@ func (m Model) renderBottomBar() string {
 			helpHint("f", "fix CI"),
 			helpHint("/", "filter"),
 			helpHint("o", "open"),
+			helpHint("!", "auto"),
 			helpHint("?", "help"),
 		}
 	case viewDetail:
