@@ -157,6 +157,32 @@ func (m Model) PRsNeedingApprovalInGroup() []github.PR {
 	return prs
 }
 
+// AutoApprovablePRs returns all filtered PRs that can be auto-approved:
+// checks passed, review required, not conflicting.
+func (m Model) AutoApprovablePRs() []github.PR {
+	var prs []github.PR
+	for i := range m.filtered {
+		pr := m.filtered[i]
+		if pr.CheckStatus == statusSuccess && pr.ReviewStatus == reviewRequired && pr.Mergeable != mergeConflicting {
+			prs = append(prs, pr)
+		}
+	}
+	return prs
+}
+
+// AutoMergeablePRs returns all filtered PRs that are already approved and
+// ready to merge: approved, checks passed, not conflicting.
+func (m Model) AutoMergeablePRs() []github.PR {
+	var prs []github.PR
+	for i := range m.filtered {
+		pr := m.filtered[i]
+		if pr.ReviewStatus == statusApproved && pr.CheckStatus == statusSuccess && pr.Mergeable != mergeConflicting {
+			prs = append(prs, pr)
+		}
+	}
+	return prs
+}
+
 // CurrentRepo returns the repo of the currently focused PR.
 func (m Model) CurrentRepo() string {
 	if len(m.filtered) == 0 {

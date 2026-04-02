@@ -24,6 +24,7 @@ func (m Model) View() string {
     r           rerun failed checks
     l           add label
     o           open in browser
+    !           auto approve + merge eligible
 
   View
     /           filter

@@ -40,6 +40,10 @@ type (
 		prKey string
 	}
 	clipboardDoneMsg struct{ count int }
+	autoModeDoneMsg  struct {
+		approved int
+		merged   int
+	}
 )
 
 func fetchPRsCmd(client *github.Client, cfg *config.Config) tea.Cmd {
@@ -146,6 +150,33 @@ func batchApproveCmd(client *github.Client, prs []github.PR) tea.Cmd {
 		},
 		listenProgress(ch),
 	)
+}
+
+func autoModeCmd(client *github.Client, toApprove, toMerge []github.PR, method string) tea.Cmd {
+	return func() tea.Msg {
+		// Phase 1: approve.
+		for i := range toApprove {
+			if err := client.ApprovePR(toApprove[i].ID); err != nil {
+				slog.Error("auto-approve failed", "pr", toApprove[i].Repo, "num", toApprove[i].Number, "err", err)
+				return errMsg{err: fmt.Errorf("auto-approve %s#%d: %w", toApprove[i].Repo, toApprove[i].Number, err)}
+			}
+			slog.Info("auto-approved", "pr", toApprove[i].Repo, "num", toApprove[i].Number)
+		}
+
+		// Phase 2: merge (already-approved + just-approved).
+		allMerge := make([]github.PR, 0, len(toMerge)+len(toApprove))
+		allMerge = append(allMerge, toMerge...)
+		allMerge = append(allMerge, toApprove...)
+		for i := range allMerge {
+			if err := client.MergePR(allMerge[i].ID, method); err != nil {
+				slog.Error("auto-merge failed", "pr", allMerge[i].Repo, "num", allMerge[i].Number, "err", err)
+				return errMsg{err: fmt.Errorf("auto-merge %s#%d: %w", allMerge[i].Repo, allMerge[i].Number, err)}
+			}
+			slog.Info("auto-merged", "pr", allMerge[i].Repo, "num", allMerge[i].Number)
+		}
+
+		return autoModeDoneMsg{approved: len(toApprove), merged: len(allMerge)}
+	}
 }
 
 func rerunChecksCmd(client *github.Client, pr github.PR) tea.Cmd {
