@@ -125,6 +125,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return fetchPRsCmd(m.client, m.cfg)()
 		})
 
+	case batchProgressMsg:
+		m.status = fmt.Sprintf("%s %d/%d: %s", msg.verb, msg.done, msg.total, msg.cur)
+		m.statusErr = false
+		if msg.done < msg.total {
+			return m, listenProgress(msg.ch)
+		}
+		return m, nil
+
 	case actionDoneMsg:
 		m.status = msg.msg
 		m.statusErr = false
@@ -340,11 +348,48 @@ func (m Model) View() tea.View {
 
 	bottom := m.renderBottomBar()
 	content := lipgloss.JoinVertical(lipgloss.Left, body, bottom)
+
+	if m.confirming {
+		content = m.renderPopup()
+	} else if m.loading && m.lastFetch == 0 {
+		content = m.renderLoadingPopup()
+	}
+
 	v := tea.NewView(content)
 	v.WindowTitle = fmt.Sprintf("gh-renovate-tracker — %s", m.status)
 	v.AltScreen = true
 	v.MouseMode = tea.MouseModeCellMotion
 	return v
+}
+
+func (m Model) renderLoadingPopup() string {
+	msg := m.spinner.View() + " Fetching PRs…"
+
+	box := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("4")).
+		Padding(1, 3).
+		Render(msg)
+
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, box,
+		lipgloss.WithWhitespaceChars(" "))
+}
+
+func (m Model) renderPopup() string {
+	title := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("3")).Render("Confirm")
+	msg := m.status
+	hint := styleDim.Render("y to confirm · any key to cancel")
+
+	inner := lipgloss.JoinVertical(lipgloss.Center, title, "", msg, "", hint)
+
+	box := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("3")).
+		Padding(1, 3).
+		Render(inner)
+
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, box,
+		lipgloss.WithWhitespaceChars(" "))
 }
 
 func helpHint(k, desc string) string {

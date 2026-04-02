@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -47,9 +48,11 @@ func (c *Client) FetchPRs(cfg *config.Config) ([]PR, error) {
 		return nil, fmt.Errorf("no orgs or repos configured")
 	}
 
+	slog.Debug("fetching PRs", "orgs", cfg.Orgs, "repos", cfg.Repos, "author", cfg.Author)
 	query, aliases := buildSearchQuery(cfg)
 	var result map[string]searchResult
 	if err := c.gql.Do(query, nil, &result); err != nil {
+		slog.Error("graphql fetch failed", "error", err)
 		return nil, err
 	}
 
@@ -72,6 +75,7 @@ func (c *Client) FetchPRs(cfg *config.Config) ([]PR, error) {
 			prs = append(prs, pr)
 		}
 	}
+	slog.Info("fetched PRs", "count", len(prs))
 	return prs, nil
 }
 
@@ -100,26 +104,40 @@ func buildSearchQuery(cfg *config.Config) (query string, aliases []string) {
 
 func (c *Client) MergePR(prID, mergeMethod string) error {
 	method := strings.ToUpper(mergeMethod)
+	slog.Info("merging PR", "id", prID, "method", method)
 	var result map[string]interface{}
 	vars := map[string]interface{}{"id": prID, "method": method}
-	return c.gql.Do(mergeMutation, vars, &result)
+	if err := c.gql.Do(mergeMutation, vars, &result); err != nil {
+		slog.Error("merge failed", "id", prID, "error", err)
+		return err
+	}
+	slog.Info("merge complete", "id", prID)
+	return nil
 }
 
 func (c *Client) ApprovePR(prID string) error {
+	slog.Info("approving PR", "id", prID)
 	var result map[string]interface{}
 	vars := map[string]interface{}{"id": prID}
-	return c.gql.Do(approveMutation, vars, &result)
+	if err := c.gql.Do(approveMutation, vars, &result); err != nil {
+		slog.Error("approve failed", "id", prID, "error", err)
+		return err
+	}
+	return nil
 }
 
 func (c *Client) RerunChecks(repoOwner, repoName string, suiteIDs []string) error {
+	slog.Info("rerunning checks", "repo", repoOwner+"/"+repoName, "suites", len(suiteIDs))
 	repoID, err := c.fetchRepoID(repoOwner, repoName)
 	if err != nil {
+		slog.Error("fetch repo ID failed", "repo", repoOwner+"/"+repoName, "error", err)
 		return err
 	}
 	for _, sid := range suiteIDs {
 		var result map[string]interface{}
 		vars := map[string]interface{}{"checkSuiteId": sid, "repositoryId": repoID}
 		if err := c.gql.Do(rerequestCheckSuiteMutation, vars, &result); err != nil {
+			slog.Error("rerun check suite failed", "suite", sid, "error", err)
 			return err
 		}
 	}
