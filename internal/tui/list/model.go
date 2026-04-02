@@ -38,6 +38,7 @@ const (
 
 type Model struct {
 	selected map[int]bool
+	fixing   map[string]bool
 	filter   string
 	prs      []github.PR
 	filtered []github.PR
@@ -49,7 +50,20 @@ type Model struct {
 }
 
 func New() Model {
-	return Model{selected: make(map[int]bool)}
+	return Model{selected: make(map[int]bool), fixing: make(map[string]bool)}
+}
+
+func (m Model) SetFixing(key string, active bool) Model {
+	if active {
+		m.fixing[key] = true
+	} else {
+		delete(m.fixing, key)
+	}
+	return m
+}
+
+func (m Model) IsFixing(key string) bool {
+	return m.fixing[key]
 }
 
 func (m Model) SetSize(w, h int) Model {
@@ -225,13 +239,14 @@ func (m Model) View() string {
 		return styleDim.Render("no PRs")
 	}
 
-	colRepo, colTitle, colStatus, colChecks := 30, 45, 12, 10
+	colRepo, colTitle, colStatus, colChecks, colFixing := 30, 45, 12, 10, 7
 	header := styleHeader.Render(
 		"  " +
 			padRight("Repo", colRepo) + " " +
 			padRight("Title", colTitle) + " " +
 			padRight("Status", colStatus) + " " +
 			padRight("Checks", colChecks) + " " +
+			padRight("Fixing", colFixing) + " " +
 			"Age",
 	)
 
@@ -277,12 +292,17 @@ func (m Model) renderRow(i int) string {
 		sel = "● "
 	}
 
-	colRepo, colTitle, colStatus, colChecks := 30, 45, 12, 10
+	colRepo, colTitle, colStatus, colChecks, colFixing := 30, 45, 12, 10, 7
 
 	repo := truncate(pr.Repo, colRepo-2)
 	title := truncate(pr.Title, colTitle-2)
 	status := prStatus(pr)
 	checks := prChecks(pr)
+	prKey := fmt.Sprintf("%s#%d", pr.Repo, pr.Number)
+	fixing := styleDim.Render("-")
+	if m.fixing[prKey] {
+		fixing = styleReady.Render("\u26a1")
+	}
 	age := prAge(pr.CreatedAt)
 
 	row := padRight(sel, 2) +
@@ -290,6 +310,7 @@ func (m Model) renderRow(i int) string {
 		padRight(title, colTitle) + " " +
 		padRight(status, colStatus) + " " +
 		padRight(checks, colChecks) + " " +
+		padRight(fixing, colFixing) + " " +
 		age
 
 	if i == m.cursor {

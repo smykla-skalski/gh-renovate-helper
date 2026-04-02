@@ -3,6 +3,9 @@ package tui
 import (
 	"fmt"
 	"log/slog"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -24,6 +27,16 @@ type (
 		verb  string
 		done  int
 		total int
+	}
+	fixCIReadyMsg struct {
+		worktreeDir string
+		prompt      string
+		prKey       string
+	}
+	fixCIDoneMsg struct {
+		dir   string
+		prKey string
+		err   error
 	}
 )
 
@@ -152,4 +165,105 @@ func rerunChecksCmd(client *github.Client, pr github.PR) tea.Cmd {
 		}
 		return actionDoneMsg{msg: "Rerun checks for " + pr.Repo + "#" + strconv.Itoa(pr.Number)}
 	}
+}
+
+const (
+	bareRepoBase = "/tmp/renovate-helper-repos"
+	worktreeBase = "/tmp/renovate-helper-worktrees"
+)
+
+func parsePRRepo(repo string) (owner, name string, err error) {
+	parts := strings.SplitN(repo, "/", 2)
+	if len(parts) != 2 {
+		return "", "", fmt.Errorf("invalid repo: %s", repo)
+	}
+	return parts[0], parts[1], nil
+}
+
+func worktreePaths(owner, repo string, number int) (bareDir, wtDir string) {
+	bareDir = filepath.Join(bareRepoBase, owner, repo)
+	wtDir = filepath.Join(worktreeBase, fmt.Sprintf("%s-%s-pr-%d", owner, repo, number))
+	return bareDir, wtDir
+}
+
+func buildFixCIPrompt(pr github.PR) string {
+	return fmt.Sprintf(`Fix CI failures on this Renovate dependency update PR: %s
+
+- Analyze failures, fix code so CI passes
+- Make minimal targeted changes
+- Run failing checks locally to verify
+- Commit fixes with -s -S flags`, pr.URL)
+}
+
+func prepareFixCICmd(pr github.PR) tea.Cmd {
+	return func() tea.Msg {
+		owner, repo, err := parsePRRepo(pr.Repo)
+		if err != nil {
+			return errMsg{err: err}
+		}
+
+		prKey := fmt.Sprintf("%s#%d", pr.Repo, pr.Number)
+
+		// Get PR branch name.
+		branchOut, err := exec.Command("gh", "pr", "view",
+			strconv.Itoa(pr.Number),
+			"--repo", pr.Repo,
+			"--json", "headRefName",
+			"-q", ".headRefName",
+		).Output()
+		if err != nil {
+			return errMsg{err: fmt.Errorf("get PR branch: %w", err)}
+		}
+		branch := strings.TrimSpace(string(branchOut))
+
+		bareDir, wtDir := worktreePaths(owner, repo, pr.Number)
+
+		// Setup bare clone or fetch.
+		if _, err := os.Stat(bareDir); os.IsNotExist(err) {
+			if err := os.MkdirAll(filepath.Dir(bareDir), 0o755); err != nil {
+				return errMsg{err: fmt.Errorf("mkdir bare: %w", err)}
+			}
+			tokenOut, err := exec.Command("gh", "auth", "token").Output()
+			if err != nil {
+				return errMsg{err: fmt.Errorf("gh auth token: %w", err)}
+			}
+			token := strings.TrimSpace(string(tokenOut))
+			cloneURL := fmt.Sprintf("https://x-access-token:%s@github.com/%s/%s.git", token, owner, repo)
+			slog.Info("cloning bare repo", "repo", pr.Repo, "dir", bareDir)
+			if out, err := exec.Command("git", "clone", "--bare", cloneURL, bareDir).CombinedOutput(); err != nil {
+				return errMsg{err: fmt.Errorf("git clone --bare: %s: %w", out, err)}
+			}
+		} else {
+			slog.Info("fetching branch", "repo", pr.Repo, "branch", branch)
+			if out, err := exec.Command("git", "-C", bareDir, "fetch", "origin", branch).CombinedOutput(); err != nil {
+				return errMsg{err: fmt.Errorf("git fetch: %s: %w", out, err)}
+			}
+		}
+
+		// Clean existing worktree.
+		if _, err := os.Stat(wtDir); err == nil {
+			_ = exec.Command("git", "-C", bareDir, "worktree", "remove", "--force", wtDir).Run()
+			_ = os.RemoveAll(wtDir)
+		}
+
+		// Create worktree.
+		slog.Info("creating worktree", "dir", wtDir, "branch", branch)
+		if out, err := exec.Command("git", "-C", bareDir, "worktree", "add", wtDir, "origin/"+branch).CombinedOutput(); err != nil {
+			return errMsg{err: fmt.Errorf("git worktree add: %s: %w", out, err)}
+		}
+
+		prompt := buildFixCIPrompt(pr)
+		return fixCIReadyMsg{worktreeDir: wtDir, prompt: prompt, prKey: prKey}
+	}
+}
+
+func fixCIExecCmd(dir, prompt, prKey string) tea.Cmd {
+	c := exec.Command("claude", "-p", prompt, "--dangerously-skip-permissions")
+	c.Dir = dir
+	return tea.ExecProcess(c, func(err error) tea.Msg {
+		if err != nil {
+			return fixCIDoneMsg{prKey: prKey, err: err}
+		}
+		return fixCIDoneMsg{prKey: prKey, dir: dir}
+	})
 }
