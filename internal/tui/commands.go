@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"os"
@@ -34,9 +35,9 @@ type (
 		prKey       string
 	}
 	fixCIDoneMsg struct {
+		err   error
 		dir   string
 		prKey string
-		err   error
 	}
 )
 
@@ -197,6 +198,7 @@ func buildFixCIPrompt(pr github.PR) string {
 
 func prepareFixCICmd(pr github.PR) tea.Cmd {
 	return func() tea.Msg {
+		ctx := context.Background()
 		owner, repo, err := parsePRRepo(pr.Repo)
 		if err != nil {
 			return errMsg{err: err}
@@ -205,7 +207,7 @@ func prepareFixCICmd(pr github.PR) tea.Cmd {
 		prKey := fmt.Sprintf("%s#%d", pr.Repo, pr.Number)
 
 		// Get PR branch name.
-		branchOut, err := exec.Command("gh", "pr", "view",
+		branchOut, err := exec.CommandContext(ctx, "gh", "pr", "view",
 			strconv.Itoa(pr.Number),
 			"--repo", pr.Repo,
 			"--json", "headRefName",
@@ -223,32 +225,32 @@ func prepareFixCICmd(pr github.PR) tea.Cmd {
 			if err := os.MkdirAll(filepath.Dir(bareDir), 0o755); err != nil {
 				return errMsg{err: fmt.Errorf("mkdir bare: %w", err)}
 			}
-			tokenOut, err := exec.Command("gh", "auth", "token").Output()
+			tokenOut, err := exec.CommandContext(ctx, "gh", "auth", "token").Output()
 			if err != nil {
 				return errMsg{err: fmt.Errorf("gh auth token: %w", err)}
 			}
 			token := strings.TrimSpace(string(tokenOut))
 			cloneURL := fmt.Sprintf("https://x-access-token:%s@github.com/%s/%s.git", token, owner, repo)
 			slog.Info("cloning bare repo", "repo", pr.Repo, "dir", bareDir)
-			if out, err := exec.Command("git", "clone", "--bare", cloneURL, bareDir).CombinedOutput(); err != nil {
+			if out, err := exec.CommandContext(ctx, "git", "clone", "--bare", cloneURL, bareDir).CombinedOutput(); err != nil {
 				return errMsg{err: fmt.Errorf("git clone --bare: %s: %w", out, err)}
 			}
 		} else {
 			slog.Info("fetching branch", "repo", pr.Repo, "branch", branch)
-			if out, err := exec.Command("git", "-C", bareDir, "fetch", "origin", branch).CombinedOutput(); err != nil {
+			if out, err := exec.CommandContext(ctx, "git", "-C", bareDir, "fetch", "origin", branch).CombinedOutput(); err != nil {
 				return errMsg{err: fmt.Errorf("git fetch: %s: %w", out, err)}
 			}
 		}
 
 		// Clean existing worktree.
 		if _, err := os.Stat(wtDir); err == nil {
-			_ = exec.Command("git", "-C", bareDir, "worktree", "remove", "--force", wtDir).Run()
+			_ = exec.CommandContext(ctx, "git", "-C", bareDir, "worktree", "remove", "--force", wtDir).Run()
 			_ = os.RemoveAll(wtDir)
 		}
 
 		// Create worktree.
 		slog.Info("creating worktree", "dir", wtDir, "branch", branch)
-		if out, err := exec.Command("git", "-C", bareDir, "worktree", "add", wtDir, "origin/"+branch).CombinedOutput(); err != nil {
+		if out, err := exec.CommandContext(ctx, "git", "-C", bareDir, "worktree", "add", wtDir, "origin/"+branch).CombinedOutput(); err != nil {
 			return errMsg{err: fmt.Errorf("git worktree add: %s: %w", out, err)}
 		}
 
@@ -258,7 +260,7 @@ func prepareFixCICmd(pr github.PR) tea.Cmd {
 }
 
 func fixCIExecCmd(dir, prompt, prKey string) tea.Cmd {
-	c := exec.Command("claude", "-p", prompt, "--dangerously-skip-permissions")
+	c := exec.CommandContext(context.Background(), "claude", "-p", prompt, "--dangerously-skip-permissions")
 	c.Dir = dir
 	return tea.ExecProcess(c, func(err error) tea.Msg {
 		if err != nil {

@@ -53,17 +53,17 @@ func New() Model {
 	return Model{selected: make(map[int]bool), fixing: make(map[string]bool)}
 }
 
-func (m Model) SetFixing(key string, active bool) Model {
+func (m Model) SetFixing(prKey string, active bool) Model {
 	if active {
-		m.fixing[key] = true
+		m.fixing[prKey] = true
 	} else {
-		delete(m.fixing, key)
+		delete(m.fixing, prKey)
 	}
 	return m
 }
 
-func (m Model) IsFixing(key string) bool {
-	return m.fixing[key]
+func (m Model) IsFixing(prKey string) bool {
+	return m.fixing[prKey]
 }
 
 func (m Model) SetSize(w, h int) Model {
