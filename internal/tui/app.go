@@ -133,6 +133,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case fixCIReadyMsg:
+		m.status = "launching claude..."
+		m.list = m.list.SetFixing(msg.prKey, true)
+		return m, fixCIExecCmd(msg.worktreeDir, msg.prompt, msg.prKey)
+
+	case fixCIDoneMsg:
+		m.list = m.list.SetFixing(msg.prKey, false)
+		if msg.err != nil {
+			m.status = msg.err.Error()
+			m.statusErr = true
+			return m, nil
+		}
+		m.status = "fix-ci done: " + msg.dir
+		m.statusErr = false
+		return m, fetchPRsCmd(m.client, m.cfg)
+
 	case actionDoneMsg:
 		m.status = msg.msg
 		m.statusErr = false
@@ -267,6 +283,19 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case key.Matches(msg, keys.Rerun):
 		if pr, ok := m.list.Selected(); ok {
 			return m, rerunChecksCmd(m.client, pr)
+		}
+		return m, nil
+
+	case key.Matches(msg, keys.FixCI):
+		if pr, ok := m.list.Selected(); ok {
+			if pr.CheckStatus != "FAILURE" {
+				m.status = "no failing checks"
+				return m, nil
+			}
+			return m.startConfirm(
+				fmt.Sprintf("Fix CI for %s#%d? (y/n)", pr.Repo, pr.Number),
+				prepareFixCICmd(pr),
+			), nil
 		}
 		return m, nil
 
@@ -410,6 +439,7 @@ func (m Model) renderBottomBar() string {
 			helpHint("a/A", "approve"),
 			helpHint("/", "filter"),
 			helpHint("s", "sort"),
+			helpHint("f", "fix CI"),
 			helpHint("o", "open"),
 			helpHint("esc", "clear filter"),
 			helpHint("?", "help"),

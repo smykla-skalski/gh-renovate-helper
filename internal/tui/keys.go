@@ -18,6 +18,7 @@ type keyMap struct {
 	Sort       key.Binding
 	Open       key.Binding
 	Select     key.Binding
+	FixCI      key.Binding
 	Help       key.Binding
 	Quit       key.Binding
 }
@@ -38,6 +39,7 @@ var keys = keyMap{
 	Sort:       key.NewBinding(key.WithKeys("s"), key.WithHelp("s", "sort")),
 	Open:       key.NewBinding(key.WithKeys("o"), key.WithHelp("o", "open in browser")),
 	Select:     key.NewBinding(key.WithKeys(" "), key.WithHelp("space", "select")),
+	FixCI:      key.NewBinding(key.WithKeys("f"), key.WithHelp("f", "fix CI")),
 	Help:       key.NewBinding(key.WithKeys("?"), key.WithHelp("?", "help")),
 	Quit:       key.NewBinding(key.WithKeys("q", "ctrl+c"), key.WithHelp("q", "quit")),
 }
