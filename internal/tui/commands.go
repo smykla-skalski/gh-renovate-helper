@@ -2,9 +2,11 @@ package tui
 
 import (
 	"fmt"
+	"log/slog"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -13,9 +15,16 @@ import (
 )
 
 type (
-	prsLoadedMsg  struct{ prs []github.PR }
-	errMsg        struct{ err error }
-	actionDoneMsg struct{ msg string }
+	prsLoadedMsg     struct{ prs []github.PR }
+	errMsg           struct{ err error }
+	actionDoneMsg    struct{ msg string }
+	batchProgressMsg struct {
+		ch    <-chan tea.Msg
+		done  int
+		total int
+		verb  string
+		cur   string // e.g. "owner/repo#123"
+	}
 )
 
 func fetchPRsCmd(client *github.Client, cfg *config.Config) tea.Cmd {
@@ -59,14 +68,25 @@ func addLabelCmd(client *github.Client, pr github.PR, label string) tea.Cmd {
 	}
 }
 
-func runBatch(prs []github.PR, verb string, fn func(github.PR) error) tea.Msg {
+func runBatch(prs []github.PR, verb string, fn func(github.PR) error, progressCh chan tea.Msg) tea.Msg {
+	slog.Info("batch start", "verb", verb, "count", len(prs))
 	errs := make([]error, len(prs))
+	var done atomic.Int32
+	total := len(prs)
 	var wg sync.WaitGroup
 	for i := range prs {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
 			errs[i] = fn(prs[i])
+			n := int(done.Add(1))
+			progressCh <- batchProgressMsg{
+				ch:    progressCh,
+				done:  n,
+				total: total,
+				verb:  verb,
+				cur:   fmt.Sprintf("%s#%d", prs[i].Repo, prs[i].Number),
+			}
 		}(i)
 	}
 	wg.Wait()
@@ -78,23 +98,38 @@ func runBatch(prs []github.PR, verb string, fn func(github.PR) error) tea.Msg {
 		count++
 	}
 	past := strings.ToUpper(verb[:1]) + verb[1:] + "d"
+	slog.Info("batch complete", "verb", verb, "count", count)
 	return actionDoneMsg{msg: fmt.Sprintf("%s %d PRs", past, count)}
 }
 
-func batchMergeCmd(client *github.Client, prs []github.PR, method string) tea.Cmd {
+func listenProgress(ch <-chan tea.Msg) tea.Cmd {
 	return func() tea.Msg {
-		return runBatch(prs, "merge", func(pr github.PR) error {
-			return client.MergePR(pr.ID, method)
-		})
+		return <-ch
 	}
 }
 
+func batchMergeCmd(client *github.Client, prs []github.PR, method string) tea.Cmd {
+	ch := make(chan tea.Msg, len(prs))
+	return tea.Batch(
+		func() tea.Msg {
+			return runBatch(prs, "merge", func(pr github.PR) error {
+				return client.MergePR(pr.ID, method)
+			}, ch)
+		},
+		listenProgress(ch),
+	)
+}
+
 func batchApproveCmd(client *github.Client, prs []github.PR) tea.Cmd {
-	return func() tea.Msg {
-		return runBatch(prs, "approve", func(pr github.PR) error {
-			return client.ApprovePR(pr.ID)
-		})
-	}
+	ch := make(chan tea.Msg, len(prs))
+	return tea.Batch(
+		func() tea.Msg {
+			return runBatch(prs, "approve", func(pr github.PR) error {
+				return client.ApprovePR(pr.ID)
+			}, ch)
+		},
+		listenProgress(ch),
+	)
 }
 
 func rerunChecksCmd(client *github.Client, pr github.PR) tea.Cmd {

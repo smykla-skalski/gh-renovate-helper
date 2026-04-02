@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"log/slog"
 	"os"
 	"strings"
 
@@ -23,6 +24,14 @@ func main() {
 		printOnly       = flag.Bool("print", false, "print PRs to stdout and exit")
 	)
 	flag.Parse()
+
+	logFile, err := os.OpenFile("/tmp/renovate-helper.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "log file error: %v\n", err)
+		os.Exit(1)
+	}
+	defer logFile.Close()
+	slog.SetDefault(slog.New(slog.NewTextHandler(logFile, &slog.HandlerOptions{Level: slog.LevelDebug})))
 
 	cfg, err := config.Load()
 	if err != nil {
