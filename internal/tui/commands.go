@@ -20,10 +20,10 @@ type (
 	actionDoneMsg    struct{ msg string }
 	batchProgressMsg struct {
 		ch    <-chan tea.Msg
+		cur   string // e.g. "owner/repo#123"
+		verb  string
 		done  int
 		total int
-		verb  string
-		cur   string // e.g. "owner/repo#123"
 	}
 )
 
@@ -90,6 +90,7 @@ func runBatch(prs []github.PR, verb string, fn func(github.PR) error, progressCh
 		}(i)
 	}
 	wg.Wait()
+	close(progressCh)
 	var count int
 	for i, err := range errs {
 		if err != nil {

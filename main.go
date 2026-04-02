@@ -15,6 +15,13 @@ import (
 )
 
 func main() {
+	if err := run(); err != nil {
+		fmt.Fprintf(os.Stderr, "%v\n", err)
+		os.Exit(1)
+	}
+}
+
+func run() error {
 	var (
 		orgs            = flag.String("orgs", "", "comma-separated orgs to track")
 		repos           = flag.String("repos", "", "comma-separated owner/repo pairs")
@@ -27,16 +34,14 @@ func main() {
 
 	logFile, err := os.OpenFile("/tmp/renovate-helper.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "log file error: %v\n", err)
-		os.Exit(1)
+		return fmt.Errorf("log file: %w", err)
 	}
-	defer logFile.Close()
+	defer func() { _ = logFile.Close() }()
 	slog.SetDefault(slog.New(slog.NewTextHandler(logFile, &slog.HandlerOptions{Level: slog.LevelDebug})))
 
 	cfg, err := config.Load()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "config error: %v\n", err)
-		os.Exit(1)
+		return fmt.Errorf("config: %w", err)
 	}
 
 	if *orgs != "" {
@@ -57,26 +62,24 @@ func main() {
 
 	client, err := github.NewClient()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "github client error: %v\n", err)
-		os.Exit(1)
+		return fmt.Errorf("github client: %w", err)
 	}
 
 	if *printOnly {
 		prs, err := client.FetchPRs(cfg)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "fetch error: %v\n", err)
-			os.Exit(1)
+			return fmt.Errorf("fetch: %w", err)
 		}
 		for i := range prs {
 			fmt.Printf("%s #%d %s [%s] [%s]\n",
 				prs[i].Repo, prs[i].Number, prs[i].Title, prs[i].ReviewStatus, prs[i].CheckStatus)
 		}
-		return
+		return nil
 	}
 
 	p := tea.NewProgram(tui.New(client, cfg))
 	if _, err := p.Run(); err != nil {
-		fmt.Fprintf(os.Stderr, "tui error: %v\n", err)
-		os.Exit(1)
+		return fmt.Errorf("tui: %w", err)
 	}
+	return nil
 }

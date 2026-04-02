@@ -3,19 +3,32 @@ package tui
 import (
 	"testing"
 
+	tea "charm.land/bubbletea/v2"
+
 	"github.com/klaudiush/gh-renovate-tracker/internal/github"
 )
 
 func TestBatchMergeCmd_InvalidRepo(t *testing.T) {
-	// Can't call real client, but we can test the command factory returns a func.
 	cmd := batchMergeCmd(nil, []github.PR{}, "squash")
 	if cmd == nil {
 		t.Fatal("batchMergeCmd should return a non-nil cmd")
 	}
-	// Empty PR list should return success immediately.
 	msg := cmd()
-	if _, ok := msg.(actionDoneMsg); !ok {
-		t.Errorf("empty batch should return actionDoneMsg, got %T", msg)
+	// With progress channels, batch cmds return tea.BatchMsg wrapping sub-commands.
+	batch, ok := msg.(tea.BatchMsg)
+	if !ok {
+		t.Fatalf("expected tea.BatchMsg, got %T", msg)
+	}
+	// Execute the batch runner (first cmd) — empty list should succeed immediately.
+	var found bool
+	for _, c := range batch {
+		m := c()
+		if _, ok := m.(actionDoneMsg); ok {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("empty batch should produce actionDoneMsg from one of the sub-commands")
 	}
 }
 
@@ -25,10 +38,22 @@ func TestBatchApproveCmd_Empty(t *testing.T) {
 		t.Fatal("batchApproveCmd should return a non-nil cmd")
 	}
 	msg := cmd()
-	if done, ok := msg.(actionDoneMsg); !ok {
-		t.Errorf("empty batch should return actionDoneMsg, got %T", msg)
-	} else if done.msg != "Approved 0 PRs" {
-		t.Errorf("msg = %q", done.msg)
+	batch, ok := msg.(tea.BatchMsg)
+	if !ok {
+		t.Fatalf("expected tea.BatchMsg, got %T", msg)
+	}
+	var found bool
+	for _, c := range batch {
+		m := c()
+		if done, ok := m.(actionDoneMsg); ok {
+			found = true
+			if done.msg != "Approved 0 PRs" {
+				t.Errorf("msg = %q", done.msg)
+			}
+		}
+	}
+	if !found {
+		t.Error("empty batch should produce actionDoneMsg from one of the sub-commands")
 	}
 }
 
