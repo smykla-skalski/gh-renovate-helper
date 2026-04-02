@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/klaudiush/gh-renovate-tracker/internal/config"
 	"github.com/klaudiush/gh-renovate-tracker/internal/github"
@@ -42,7 +42,7 @@ func TestStartConfirm(t *testing.T) {
 	}
 
 	// Confirm with y.
-	result, resultCmd := m.handleConfirm(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
+	result, resultCmd := m.handleConfirm(tea.KeyPressMsg{Text: "y"})
 	m = result.(Model)
 	if m.confirming {
 		t.Error("confirming should be false after y")
@@ -58,7 +58,7 @@ func TestConfirmCancel(t *testing.T) {
 	m := newTestModel()
 	m = m.startConfirm("Merge? (y/n)", func() tea.Msg { return nil })
 
-	result, cmd := m.handleConfirm(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
+	result, cmd := m.handleConfirm(tea.KeyPressMsg{Text: "n"})
 	m = result.(Model)
 	if m.confirming {
 		t.Error("confirming should be false after cancel")
@@ -75,7 +75,7 @@ func TestConfirmEsc(t *testing.T) {
 	m := newTestModel()
 	m = m.startConfirm("Merge? (y/n)", func() tea.Msg { return nil })
 
-	result, cmd := m.handleConfirm(tea.KeyMsg{Type: tea.KeyEscape})
+	result, cmd := m.handleConfirm(tea.KeyPressMsg{Code: tea.KeyEscape})
 	m = result.(Model)
 	if m.confirming {
 		t.Error("confirming should be false after esc")
@@ -89,7 +89,7 @@ func TestHandleKey_MergeTriggersConfirm(t *testing.T) {
 	m := newTestModel()
 	m.current = viewList
 
-	result, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'m'}})
+	result, _ := m.handleKey(tea.KeyPressMsg{Text: "m"})
 	m = result.(Model)
 	if !m.confirming {
 		t.Error("pressing m should trigger confirmation")
@@ -103,7 +103,7 @@ func TestHandleKey_LabelOpensInput(t *testing.T) {
 	m := newTestModel()
 	m.current = viewList
 
-	result, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'l'}})
+	result, _ := m.handleKey(tea.KeyPressMsg{Text: "l"})
 	m = result.(Model)
 	if m.current != viewLabel {
 		t.Errorf("current = %d, want viewLabel (%d)", m.current, viewLabel)
@@ -117,7 +117,7 @@ func TestHandleLabelInput_Esc(t *testing.T) {
 	m := newTestModel()
 	m.current = viewLabel
 
-	result, _ := m.handleLabelInput(tea.KeyMsg{Type: tea.KeyEscape})
+	result, _ := m.handleLabelInput(tea.KeyPressMsg{Code: tea.KeyEscape})
 	m = result.(Model)
 	if m.current != viewList {
 		t.Errorf("current = %d, want viewList after esc", m.current)

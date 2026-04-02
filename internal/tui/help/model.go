@@ -1,6 +1,6 @@
 package help
 
-import "github.com/charmbracelet/lipgloss"
+import "charm.land/lipgloss/v2"
 
 // Model is the help overlay.
 type Model struct{}
