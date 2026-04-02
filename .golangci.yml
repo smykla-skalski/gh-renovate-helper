@@ -39,42 +39,43 @@ linters:
     - wastedassign
     - whitespace
 
-linters-settings:
-  gofumpt:
-    extra-rules: true
-  govet:
-    enable-all: true
-  revive:
-    rules:
-      - name: exported
-      - name: error-return
-      - name: error-strings
-      - name: var-naming
-      - name: blank-imports
-      - name: context-as-argument
-      - name: dot-imports
-      - name: empty-block
-      - name: superfluous-else
-      - name: unreachable-code
-      - name: redefines-builtin-id
-  gocritic:
-    enabled-tags:
-      - diagnostic
-      - style
-      - performance
-  nolintlint:
-    require-explanation: true
-    require-specific: true
-  nilaway:
-    include-pkgs:
-      - github.com/klaudiush/gh-renovate-tracker/...
+  settings:
+    gofumpt:
+      extra-rules: true
+    govet:
+      enable-all: true
+    revive:
+      rules:
+        - name: exported
+        - name: error-return
+        - name: error-strings
+        - name: var-naming
+        - name: blank-imports
+        - name: context-as-argument
+        - name: dot-imports
+        - name: empty-block
+        - name: superfluous-else
+        - name: unreachable-code
+        - name: redefines-builtin-id
+    gocritic:
+      enabled-tags:
+        - diagnostic
+        - style
+        - performance
+    nolintlint:
+      require-explanation: true
+      require-specific: true
+    nilaway:
+      include-pkgs:
+        - github.com/klaudiush/gh-renovate-tracker/...
 
 issues:
   max-issues-per-linter: 0
   max-same-issues: 0
-  exclude-rules:
-    - path: _test\.go
-      linters:
-        - forcetypeassert
-        - unparam
-        - gocritic
+  exclusions:
+    rules:
+      - path: _test\.go
+        linters:
+          - forcetypeassert
+          - unparam
+          - gocritic
