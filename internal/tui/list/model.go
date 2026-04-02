@@ -46,7 +46,6 @@ type Model struct {
 	width    int
 	height   int
 	sort     sortMode
-	grouped  bool
 }
 
 func New() Model {
@@ -82,13 +81,8 @@ func (m Model) SetFilter(f string) Model {
 }
 
 func (m Model) sortFiltered() {
-	if m.grouped {
-		// Primary sort by repo, secondary by current sort mode.
-		sortPRs(m.filtered, m.sort)
-		stableSortByRepo(m.filtered)
-	} else {
-		sortPRs(m.filtered, m.sort)
-	}
+	sortPRs(m.filtered, m.sort)
+	stableSortByRepo(m.filtered)
 }
 
 func stableSortByRepo(prs []github.PR) {
@@ -116,6 +110,30 @@ func (m Model) SelectedPRs() []github.PR {
 	return prs
 }
 
+// SelectedPRsInGroup returns selected PRs belonging to the same repo as the
+// currently focused PR.
+func (m Model) SelectedPRsInGroup() []github.PR {
+	if len(m.filtered) == 0 {
+		return nil
+	}
+	repo := m.filtered[m.cursor].Repo
+	var prs []github.PR
+	for i, sel := range m.selected {
+		if sel && i < len(m.filtered) && m.filtered[i].Repo == repo {
+			prs = append(prs, m.filtered[i])
+		}
+	}
+	return prs
+}
+
+// CurrentRepo returns the repo of the currently focused PR.
+func (m Model) CurrentRepo() string {
+	if len(m.filtered) == 0 {
+		return ""
+	}
+	return m.filtered[m.cursor].Repo
+}
+
 func (m Model) ClearSelected() Model {
 	m.selected = make(map[int]bool)
 	return m
@@ -140,14 +158,32 @@ func (m Model) moveUp(n int) Model {
 	return m
 }
 
+func (m Model) lastVisibleIndex(offset int) int {
+	visible := m.visibleRows()
+	rowsUsed := 0
+	last := offset
+	var lastRepo string
+	for i := offset; i < len(m.filtered) && rowsUsed < visible; i++ {
+		if m.filtered[i].Repo != lastRepo {
+			lastRepo = m.filtered[i].Repo
+			if rowsUsed+1 >= visible {
+				break
+			}
+			rowsUsed++
+		}
+		rowsUsed++
+		last = i
+	}
+	return last
+}
+
 func (m Model) moveDown(n int) Model {
 	if len(m.filtered) == 0 {
 		return m
 	}
 	m.cursor = min(len(m.filtered)-1, m.cursor+n)
-	vis := m.visibleRows()
-	if m.cursor >= m.offset+vis {
-		m.offset = m.cursor - vis + 1
+	for m.cursor > m.lastVisibleIndex(m.offset) {
+		m.offset++
 	}
 	return m
 }
@@ -164,9 +200,6 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			m.selected[m.cursor] = !m.selected[m.cursor]
 		case key.Matches(msg, sortKey):
 			m.sort = (m.sort + 1) % 3
-			m.sortFiltered()
-		case key.Matches(msg, groupKey):
-			m.grouped = !m.grouped
 			m.sortFiltered()
 		}
 	case tea.MouseWheelMsg:
@@ -185,7 +218,6 @@ var (
 	downKey   = key.NewBinding(key.WithKeys("j", "down"))
 	selectKey = key.NewBinding(key.WithKeys(" "))
 	sortKey   = key.NewBinding(key.WithKeys("s"))
-	groupKey  = key.NewBinding(key.WithKeys("g"))
 )
 
 func (m Model) View() string {
@@ -205,16 +237,21 @@ func (m Model) View() string {
 
 	visible := m.visibleRows()
 	start := m.offset
-	end := min(start+visible, len(m.filtered))
 
 	var rows []string
 	var lastRepo string
-	for i := start; i < end; i++ {
-		if m.grouped && m.filtered[i].Repo != lastRepo {
+	rowsUsed := 0
+	for i := start; i < len(m.filtered) && rowsUsed < visible; i++ {
+		if m.filtered[i].Repo != lastRepo {
 			lastRepo = m.filtered[i].Repo
+			if rowsUsed+1 >= visible {
+				break
+			}
 			rows = append(rows, styleHeader.Render(lastRepo))
+			rowsUsed++
 		}
 		rows = append(rows, m.renderRow(i))
+		rowsUsed++
 	}
 
 	inner := lipgloss.JoinVertical(lipgloss.Left,

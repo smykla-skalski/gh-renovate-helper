@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"sync"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -58,29 +59,41 @@ func addLabelCmd(client *github.Client, pr github.PR, label string) tea.Cmd {
 	}
 }
 
+func runBatch(prs []github.PR, verb string, fn func(github.PR) error) tea.Msg {
+	errs := make([]error, len(prs))
+	var wg sync.WaitGroup
+	for i := range prs {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			errs[i] = fn(prs[i])
+		}(i)
+	}
+	wg.Wait()
+	var count int
+	for i, err := range errs {
+		if err != nil {
+			return errMsg{err: fmt.Errorf("%s %s#%d: %w", verb, prs[i].Repo, prs[i].Number, err)}
+		}
+		count++
+	}
+	past := strings.ToUpper(verb[:1]) + verb[1:] + "d"
+	return actionDoneMsg{msg: fmt.Sprintf("%s %d PRs", past, count)}
+}
+
 func batchMergeCmd(client *github.Client, prs []github.PR, method string) tea.Cmd {
 	return func() tea.Msg {
-		var merged int
-		for i := range prs {
-			if err := client.MergePR(prs[i].ID, method); err != nil {
-				return errMsg{err: fmt.Errorf("merge %s#%d: %w", prs[i].Repo, prs[i].Number, err)}
-			}
-			merged++
-		}
-		return actionDoneMsg{msg: fmt.Sprintf("Merged %d PRs", merged)}
+		return runBatch(prs, "merge", func(pr github.PR) error {
+			return client.MergePR(pr.ID, method)
+		})
 	}
 }
 
 func batchApproveCmd(client *github.Client, prs []github.PR) tea.Cmd {
 	return func() tea.Msg {
-		var approved int
-		for i := range prs {
-			if err := client.ApprovePR(prs[i].ID); err != nil {
-				return errMsg{err: fmt.Errorf("approve %s#%d: %w", prs[i].Repo, prs[i].Number, err)}
-			}
-			approved++
-		}
-		return actionDoneMsg{msg: fmt.Sprintf("Approved %d PRs", approved)}
+		return runBatch(prs, "approve", func(pr github.PR) error {
+			return client.ApprovePR(pr.ID)
+		})
 	}
 }
 

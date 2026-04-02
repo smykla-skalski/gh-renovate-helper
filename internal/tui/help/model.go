@@ -28,7 +28,6 @@ func (m Model) View() string {
   View
     /           filter
     s           cycle sort mode
-    g           group by repo
     R           force refresh
     ?           this help
     q           quit

@@ -16,7 +16,6 @@ type keyMap struct {
 	Refresh    key.Binding
 	Filter     key.Binding
 	Sort       key.Binding
-	Group      key.Binding
 	Open       key.Binding
 	Select     key.Binding
 	Help       key.Binding
@@ -37,7 +36,6 @@ var keys = keyMap{
 	Refresh:    key.NewBinding(key.WithKeys("R"), key.WithHelp("R", "force refresh")),
 	Filter:     key.NewBinding(key.WithKeys("/"), key.WithHelp("/", "filter")),
 	Sort:       key.NewBinding(key.WithKeys("s"), key.WithHelp("s", "sort")),
-	Group:      key.NewBinding(key.WithKeys("g"), key.WithHelp("g", "group by repo")),
 	Open:       key.NewBinding(key.WithKeys("o"), key.WithHelp("o", "open in browser")),
 	Select:     key.NewBinding(key.WithKeys(" "), key.WithHelp("space", "select")),
 	Help:       key.NewBinding(key.WithKeys("?"), key.WithHelp("?", "help")),

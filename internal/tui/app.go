@@ -234,12 +234,12 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case key.Matches(msg, keys.MergeAll):
-		prs := m.list.SelectedPRs()
+		prs := m.list.SelectedPRsInGroup()
 		if len(prs) == 0 {
 			return m, nil
 		}
 		return m.startConfirm(
-			fmt.Sprintf("Merge %d PRs? (y/n)", len(prs)),
+			fmt.Sprintf("Merge %d PRs in %s? (y/n)", len(prs), m.list.CurrentRepo()),
 			batchMergeCmd(m.client, prs, m.cfg.MergeMethod),
 		), nil
 
@@ -250,7 +250,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case key.Matches(msg, keys.ApproveAll):
-		prs := m.list.SelectedPRs()
+		prs := m.list.SelectedPRsInGroup()
 		if len(prs) == 0 {
 			return m, nil
 		}
@@ -365,7 +365,6 @@ func (m Model) renderBottomBar() string {
 			helpHint("a/A", "approve"),
 			helpHint("/", "filter"),
 			helpHint("s", "sort"),
-			helpHint("g", "group"),
 			helpHint("o", "open"),
 			helpHint("esc", "clear filter"),
 			helpHint("?", "help"),

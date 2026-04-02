@@ -232,7 +232,6 @@ func TestGroupedSort(t *testing.T) {
 	}
 	m := Model{
 		selected: make(map[int]bool),
-		grouped:  true,
 		sort:     sortByStatus,
 	}
 	m = m.SetPRs(prs)
@@ -252,7 +251,6 @@ func TestGroupedSort(t *testing.T) {
 func TestViewGrouped_RepoHeaders(t *testing.T) {
 	m := Model{
 		selected: make(map[int]bool),
-		grouped:  true,
 		width:    120,
 		height:   20,
 	}
