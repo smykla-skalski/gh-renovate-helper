@@ -156,3 +156,112 @@ func TestModelSetFilter(t *testing.T) {
 		t.Errorf("filtered selected = %q, want c/d", pr.Repo)
 	}
 }
+
+func TestSelectedPRs_Empty(t *testing.T) {
+	m := New().SetPRs([]github.PR{
+		{Repo: "a/b"},
+		{Repo: "c/d"},
+	})
+	if got := m.SelectedPRs(); len(got) != 0 {
+		t.Errorf("SelectedPRs() = %d, want 0", len(got))
+	}
+}
+
+func TestSelectedPRs_MultiSelect(t *testing.T) {
+	m := New().SetPRs([]github.PR{
+		{Repo: "a/b"},
+		{Repo: "c/d"},
+		{Repo: "e/f"},
+	})
+	m.selected[0] = true
+	m.selected[2] = true
+	got := m.SelectedPRs()
+	if len(got) != 2 {
+		t.Fatalf("SelectedPRs() len = %d, want 2", len(got))
+	}
+	repos := map[string]bool{got[0].Repo: true, got[1].Repo: true}
+	if !repos["a/b"] || !repos["e/f"] {
+		t.Errorf("SelectedPRs repos = %v, want a/b and e/f", repos)
+	}
+}
+
+func TestSelectedPRs_OutOfBounds(t *testing.T) {
+	m := New().SetPRs([]github.PR{{Repo: "a/b"}})
+	m.selected[5] = true
+	if got := m.SelectedPRs(); len(got) != 0 {
+		t.Errorf("SelectedPRs() with out-of-bounds index = %d, want 0", len(got))
+	}
+}
+
+func TestClearSelected(t *testing.T) {
+	m := New().SetPRs([]github.PR{{Repo: "a/b"}, {Repo: "c/d"}})
+	m.selected[0] = true
+	m.selected[1] = true
+	m = m.ClearSelected()
+	if got := m.SelectedPRs(); len(got) != 0 {
+		t.Errorf("after ClearSelected(), SelectedPRs() = %d, want 0", len(got))
+	}
+}
+
+func TestStableSortByRepo(t *testing.T) {
+	prs := []github.PR{
+		{Repo: "zzz/a", Title: "first"},
+		{Repo: "aaa/b", Title: "second"},
+		{Repo: "zzz/a", Title: "third"},
+		{Repo: "aaa/b", Title: "fourth"},
+	}
+	stableSortByRepo(prs)
+	if prs[0].Repo != "aaa/b" || prs[1].Repo != "aaa/b" {
+		t.Errorf("first two should be aaa/b, got %q %q", prs[0].Repo, prs[1].Repo)
+	}
+	if prs[2].Repo != "zzz/a" || prs[3].Repo != "zzz/a" {
+		t.Errorf("last two should be zzz/a, got %q %q", prs[2].Repo, prs[3].Repo)
+	}
+	// Stable: original order within same repo preserved.
+	if prs[0].Title != "second" || prs[1].Title != "fourth" {
+		t.Errorf("stability broken: aaa/b titles = %q, %q", prs[0].Title, prs[1].Title)
+	}
+}
+
+func TestGroupedSort(t *testing.T) {
+	prs := []github.PR{
+		{Repo: "zzz/z", ReviewStatus: "APPROVED", CheckStatus: "SUCCESS"},
+		{Repo: "aaa/a", CheckStatus: "FAILURE"},
+		{Repo: "zzz/z", CheckStatus: "PENDING"},
+		{Repo: "aaa/a", ReviewStatus: "APPROVED", CheckStatus: "SUCCESS"},
+	}
+	m := Model{
+		selected: make(map[int]bool),
+		grouped:  true,
+		sort:     sortByStatus,
+	}
+	m = m.SetPRs(prs)
+	// Grouped: primary by repo, secondary by status.
+	if m.filtered[0].Repo != "aaa/a" {
+		t.Errorf("first repo = %q, want aaa/a", m.filtered[0].Repo)
+	}
+	if m.filtered[2].Repo != "zzz/z" {
+		t.Errorf("third repo = %q, want zzz/z", m.filtered[2].Repo)
+	}
+	// Within aaa/a group: ready (approved+success) before failure.
+	if m.filtered[0].CheckStatus != "SUCCESS" {
+		t.Errorf("aaa/a first should be ready, got CheckStatus=%q", m.filtered[0].CheckStatus)
+	}
+}
+
+func TestViewGrouped_RepoHeaders(t *testing.T) {
+	m := Model{
+		selected: make(map[int]bool),
+		grouped:  true,
+		width:    120,
+		height:   20,
+	}
+	m = m.SetPRs([]github.PR{
+		{Repo: "aaa/a", Title: "pr1"},
+		{Repo: "bbb/b", Title: "pr2"},
+	})
+	view := m.View()
+	if !strings.Contains(view, "aaa/a") || !strings.Contains(view, "bbb/b") {
+		t.Error("grouped view should contain repo headers")
+	}
+}
