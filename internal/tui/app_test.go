@@ -8,8 +8,8 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/exp/golden"
 
-	"github.com/klaudiush/gh-renovate-tracker/internal/config"
-	"github.com/klaudiush/gh-renovate-tracker/internal/github"
+	"github.com/smykla-skalski/gh-renovate-helper/internal/config"
+	"github.com/smykla-skalski/gh-renovate-helper/internal/github"
 )
 
 func newTestModel() Model {

@@ -1,4 +1,4 @@
-module github.com/klaudiush/gh-renovate-tracker
+module github.com/smykla-skalski/gh-renovate-helper
 
 go 1.25.0
 

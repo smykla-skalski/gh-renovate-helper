@@ -8,7 +8,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/klaudiush/gh-renovate-tracker/internal/github"
+	"github.com/smykla-skalski/gh-renovate-helper/internal/github"
 )
 
 func TestApplyFilter_Empty(t *testing.T) {
