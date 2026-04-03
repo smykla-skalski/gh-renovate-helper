@@ -11,7 +11,7 @@ import (
 
 	gogh "github.com/cli/go-gh/v2/pkg/api"
 
-	"github.com/klaudiush/gh-renovate-tracker/internal/config"
+	"github.com/smykla-skalski/gh-renovate-helper/internal/config"
 )
 
 const (

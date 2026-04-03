@@ -6,7 +6,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/klaudiush/gh-renovate-tracker/internal/github"
+	"github.com/smykla-skalski/gh-renovate-helper/internal/github"
 )
 
 const (

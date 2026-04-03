@@ -11,12 +11,12 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
-	"github.com/klaudiush/gh-renovate-tracker/internal/config"
-	"github.com/klaudiush/gh-renovate-tracker/internal/github"
-	"github.com/klaudiush/gh-renovate-tracker/internal/tui/detail"
-	"github.com/klaudiush/gh-renovate-tracker/internal/tui/filter"
-	"github.com/klaudiush/gh-renovate-tracker/internal/tui/help"
-	"github.com/klaudiush/gh-renovate-tracker/internal/tui/prlist"
+	"github.com/smykla-skalski/gh-renovate-helper/internal/config"
+	"github.com/smykla-skalski/gh-renovate-helper/internal/github"
+	"github.com/smykla-skalski/gh-renovate-helper/internal/tui/detail"
+	"github.com/smykla-skalski/gh-renovate-helper/internal/tui/filter"
+	"github.com/smykla-skalski/gh-renovate-helper/internal/tui/help"
+	"github.com/smykla-skalski/gh-renovate-helper/internal/tui/prlist"
 )
 
 type view int
