@@ -11,7 +11,7 @@ import (
 func TestApplyFilter_Empty(t *testing.T) {
 	prs := []github.PR{
 		{Repo: "kumahq/kuma", Title: "update go"},
-		{Repo: "Kong/mesh", Title: "update helm"},
+		{Repo: "smykla-skalski/app", Title: "update helm"},
 	}
 	got := applyFilter(prs, "")
 	if len(got) != 2 {
@@ -22,7 +22,7 @@ func TestApplyFilter_Empty(t *testing.T) {
 func TestApplyFilter_ByRepo(t *testing.T) {
 	prs := []github.PR{
 		{Repo: "kumahq/kuma", Title: "update go"},
-		{Repo: "Kong/mesh", Title: "update helm"},
+		{Repo: "smykla-skalski/app", Title: "update helm"},
 	}
 	got := applyFilter(prs, "kumahq")
 	if len(got) != 1 || got[0].Repo != "kumahq/kuma" {
