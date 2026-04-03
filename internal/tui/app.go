@@ -464,7 +464,7 @@ func (m Model) View() tea.View {
 
 	bottom := m.renderBottomBar()
 	bodyH := m.height - 1
-	body = lipgloss.NewStyle().Height(bodyH).Render(body)
+	body = lipgloss.NewStyle().Height(bodyH).MaxHeight(bodyH).Render(body)
 	content := lipgloss.JoinVertical(lipgloss.Left, body, bottom)
 
 	switch {
