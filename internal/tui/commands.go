@@ -67,6 +67,7 @@ type (
 		approved int
 		merged   int
 	}
+	cacheClearedMsg struct{}
 )
 
 func fetchPRsCmd(client *github.Client, cfg *config.Config) tea.Cmd {

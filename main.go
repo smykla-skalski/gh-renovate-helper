@@ -31,8 +31,17 @@ func run() error {
 		refreshInterval = flag.Duration("refresh", 0, "refresh interval (e.g. 5m)")
 		cacheMaxAge     = flag.Duration("cache-max-age", 0, "max cache age before showing stale indicator (e.g. 24h)")
 		printOnly       = flag.Bool("print", false, "print PRs to stdout and exit")
+		clearCacheFlag  = flag.Bool("clear-cache", false, "delete the local PR cache and exit")
 	)
 	flag.Parse()
+
+	if *clearCacheFlag {
+		if err := cache.Empty().Clear(); err != nil {
+			return fmt.Errorf("clear cache: %w", err)
+		}
+		fmt.Println("cache cleared")
+		return nil
+	}
 
 	logFile, err := os.OpenFile("/tmp/renovate-helper.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 	if err != nil {

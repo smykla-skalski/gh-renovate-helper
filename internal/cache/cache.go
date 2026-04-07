@@ -130,6 +130,19 @@ func (c *Cache) Save() error {
 	return nil
 }
 
+// Clear removes all cached entries from memory and deletes the cache file.
+// If the file does not exist, no error is returned.
+func (c *Cache) Clear() error {
+	c.mu.Lock()
+	c.entries = make(map[string]Entry)
+	c.mu.Unlock()
+	err := os.Remove(c.path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	return err
+}
+
 // AllPRs returns a flat slice of all cached PRs across all repos.
 func (c *Cache) AllPRs() []github.PR {
 	c.mu.RLock()

@@ -260,6 +260,38 @@ func TestEmpty_Usable(t *testing.T) {
 	}
 }
 
+func TestClear_RemovesEntriesAndFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "cache.json")
+	c := cache.EmptyAt(path)
+	c.Set("org/repo", makePRs("org/repo", 1), time.Now())
+	if err := c.Save(); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	if err := c.Clear(); err != nil {
+		t.Fatalf("Clear: %v", err)
+	}
+
+	if len(c.Repos()) != 0 {
+		t.Error("Repos() should be empty after Clear")
+	}
+	if len(c.AllPRs()) != 0 {
+		t.Error("AllPRs() should be empty after Clear")
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Error("cache file should be deleted after Clear")
+	}
+}
+
+func TestClear_NoFileIsNotError(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "nonexistent.json")
+	c := cache.EmptyAt(path)
+	if err := c.Clear(); err != nil {
+		t.Errorf("Clear on non-existent file should not error: %v", err)
+	}
+}
+
 func TestLoad_RoundTrip(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "cache.json")

@@ -201,6 +201,25 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, scheduledOrgDiscoverCmd(m.client, m.cfg, msg.org, m.cfg.RefreshInterval+jitter))
 		return m, tea.Batch(cmds...)
 
+	case cacheClearedMsg:
+		_ = m.cache.Clear()
+		m.list = m.list.SetPRs([]github.PR{})
+		m.list = m.list.SetStaleRepos(nil)
+		m.loading = true
+		m.lastFetch = 0
+		m.scheduledRepos = make(map[string]bool)
+		var cmds []tea.Cmd
+		for i, repo := range m.cfg.Repos {
+			delay := time.Duration(i) * 200 * time.Millisecond
+			cmds = append(cmds, scheduledRepoRefreshCmd(m.client, m.cfg, repo, delay))
+			m.scheduledRepos[repo] = true
+		}
+		for i, org := range m.cfg.Orgs {
+			delay := time.Duration(i) * 300 * time.Millisecond
+			cmds = append(cmds, scheduledOrgDiscoverCmd(m.client, m.cfg, org, delay))
+		}
+		return m, tea.Batch(cmds...)
+
 	case batchProgressMsg:
 		m.status = fmt.Sprintf("%s %d/%d: %s", msg.verb, msg.done, msg.total, msg.cur)
 		m.statusErr = false
@@ -467,6 +486,10 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			autoModeCmd(m.client, toApprove, toMerge, m.cfg.MergeMethod),
 		), nil
 
+	case key.Matches(msg, keys.ClearCache):
+		return m.startConfirm("Clear cache and re-fetch all? (y/n)",
+			func() tea.Msg { return cacheClearedMsg{} }), nil
+
 	case key.Matches(msg, keys.Label):
 		if pr, ok := m.list.Selected(); ok {
 			ti := textinput.New()
@@ -708,6 +731,7 @@ func (m Model) renderBottomBar() string {
 			helpHint("/", "filter"),
 			helpHint("o", "open"),
 			helpHint("!", "auto"),
+			helpHint("X", "clear cache"),
 			helpHint("?", "help"),
 		}
 	case viewDetail:

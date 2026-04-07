@@ -33,3 +33,7 @@ run = "go test ./internal/tui/ -update"
 [tasks.upgrade]
 description = "Upgrade gh extension to latest release"
 run = "gh ext upgrade renovate-helper"
+
+[tasks.clear-cache]
+description = "Delete the local PR cache"
+run = "go run main.go --clear-cache"

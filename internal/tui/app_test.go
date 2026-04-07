@@ -286,6 +286,53 @@ func TestUpdate_RepoPRsLoadedMsg_ListReflectsMergedPRs(t *testing.T) {
 	}
 }
 
+// --- cacheClearedMsg handler ---
+
+func TestUpdate_CacheClearedMsg_ResetsState(t *testing.T) {
+	c := cache.EmptyAt(t.TempDir() + "/cache.json")
+	c.Set("org/repo", []github.PR{{ID: "1", Repo: "org/repo"}}, time.Now())
+	cfg := &config.Config{
+		RefreshInterval: 5 * time.Minute,
+		CacheMaxAge:     24 * time.Hour,
+		Repos:           []string{"org/repo"},
+	}
+	m := New(nil, cfg, c)
+
+	result, cmd := m.Update(cacheClearedMsg{})
+	m = result.(Model)
+
+	if len(m.cache.AllPRs()) != 0 {
+		t.Error("cache should be empty after cacheClearedMsg")
+	}
+	if len(m.list.AllPRs()) != 0 {
+		t.Error("list should be empty after cacheClearedMsg")
+	}
+	if !m.loading {
+		t.Error("loading should be true after cacheClearedMsg")
+	}
+	if m.lastFetch != 0 {
+		t.Error("lastFetch should be reset to 0")
+	}
+	if cmd == nil {
+		t.Error("should return refresh cmds after cacheClearedMsg")
+	}
+}
+
+func TestUpdate_CacheClearedMsg_ReschedulesOrgs(t *testing.T) {
+	c := cache.EmptyAt(t.TempDir() + "/cache.json")
+	cfg := &config.Config{
+		RefreshInterval: 5 * time.Minute,
+		CacheMaxAge:     24 * time.Hour,
+		Orgs:            []string{"myorg"},
+	}
+	m := New(nil, cfg, c)
+
+	_, cmd := m.Update(cacheClearedMsg{})
+	if cmd == nil {
+		t.Error("should return cmd including org discovery after cacheClearedMsg")
+	}
+}
+
 func TestStartConfirm(t *testing.T) {
 	m := newTestModel()
 	called := false
