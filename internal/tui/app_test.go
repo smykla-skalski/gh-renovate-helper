@@ -160,7 +160,7 @@ func TestInitialRepoDelay_MultipleRepos_Staggered(t *testing.T) {
 // --- orgDiscoveredMsg handler ---
 
 func TestUpdate_OrgDiscoveredMsg_NewReposScheduled(t *testing.T) {
-	c := cache.Empty()
+	c := cache.EmptyAt(t.TempDir() + "/cache.json")
 	cfg := &config.Config{RefreshInterval: 5 * time.Minute, CacheMaxAge: 24 * time.Hour}
 	m := New(nil, cfg, c)
 
@@ -198,7 +198,7 @@ func TestUpdate_OrgDiscoveredMsg_NewReposScheduled(t *testing.T) {
 }
 
 func TestUpdate_OrgDiscoveredMsg_ExistingReposNotDuplicated(t *testing.T) {
-	c := cache.Empty()
+	c := cache.EmptyAt(t.TempDir() + "/cache.json")
 	cfg := &config.Config{RefreshInterval: 5 * time.Minute, CacheMaxAge: 24 * time.Hour}
 	m := New(nil, cfg, c)
 	// Pre-mark a repo as already scheduled.
@@ -225,7 +225,7 @@ func TestUpdate_OrgDiscoveredMsg_ExistingReposNotDuplicated(t *testing.T) {
 // --- repoPRsLoadedMsg handler ---
 
 func TestUpdate_RepoPRsLoadedMsg_UpdatesCache(t *testing.T) {
-	c := cache.Empty()
+	c := cache.EmptyAt(t.TempDir() + "/cache.json")
 	cfg := &config.Config{RefreshInterval: 5 * time.Minute, CacheMaxAge: 24 * time.Hour}
 	m := New(nil, cfg, c)
 
@@ -259,7 +259,7 @@ func TestUpdate_RepoPRsLoadedMsg_UpdatesCache(t *testing.T) {
 }
 
 func TestUpdate_RepoPRsLoadedMsg_ListReflectsMergedPRs(t *testing.T) {
-	c := cache.Empty()
+	c := cache.EmptyAt(t.TempDir() + "/cache.json")
 	// Pre-populate cache with another repo.
 	c.Set("org/other", []github.PR{{ID: "x", Repo: "org/other"}}, time.Now())
 	cfg := &config.Config{RefreshInterval: 5 * time.Minute, CacheMaxAge: 24 * time.Hour}
