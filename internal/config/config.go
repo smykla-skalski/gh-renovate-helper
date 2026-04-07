@@ -11,6 +11,7 @@ import (
 type Config struct {
 	Author          string        `yaml:"author"`
 	MergeMethod     string        `yaml:"merge_method"`
+	Remote          string        `yaml:"remote"`
 	Orgs            []string      `yaml:"orgs"`
 	Repos           []string      `yaml:"repos"`
 	ExcludeRepos    []string      `yaml:"exclude_repos"`

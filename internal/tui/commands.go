@@ -257,6 +257,24 @@ func worktreePaths(owner, repo string, number int) (bareDir, wtDir string) {
 	return bareDir, wtDir
 }
 
+// cloneBareRepo creates a bare clone of owner/repo at bareDir using a gh auth token.
+func cloneBareRepo(ctx context.Context, owner, repo, bareDir string) error {
+	if err := os.MkdirAll(filepath.Dir(bareDir), 0o755); err != nil {
+		return fmt.Errorf("mkdir bare: %w", err)
+	}
+	tokenOut, err := exec.CommandContext(ctx, "gh", "auth", "token").Output()
+	if err != nil {
+		return fmt.Errorf("gh auth token: %w", err)
+	}
+	token := strings.TrimSpace(string(tokenOut))
+	cloneURL := fmt.Sprintf("https://x-access-token:%s@github.com/%s/%s.git", token, owner, repo)
+	slog.Info("cloning bare repo", "repo", owner+"/"+repo, "dir", bareDir)
+	if out, err := exec.CommandContext(ctx, "git", "clone", "--bare", cloneURL, bareDir).CombinedOutput(); err != nil {
+		return fmt.Errorf("git clone --bare: %s: %w", out, err)
+	}
+	return nil
+}
+
 func buildFixCIPrompt(pr github.PR) string {
 	return fmt.Sprintf(`Fix CI failures on this Renovate dependency update PR: %s
 
@@ -266,7 +284,32 @@ func buildFixCIPrompt(pr github.PR) string {
 - Commit fixes with -s -S flags`, pr.URL)
 }
 
-func prepareFixCICmd(pr github.PR) tea.Cmd {
+// resolveRemote returns the remote name to use for the bare repo at bareDir.
+// Priority: cfg.Remote (explicit) > "upstream" (if present) > "origin" (if present).
+// Returns an error if no usable remote is found.
+func resolveRemote(ctx context.Context, bareDir string, cfg *config.Config) (string, error) {
+	if cfg.Remote != "" {
+		return cfg.Remote, nil
+	}
+	out, err := exec.CommandContext(ctx, "git", "-C", bareDir, "remote").Output()
+	if err != nil {
+		return "", fmt.Errorf("git remote: %w", err)
+	}
+	remotes := strings.Fields(string(out))
+	set := make(map[string]bool, len(remotes))
+	for _, r := range remotes {
+		set[r] = true
+	}
+	if set["upstream"] {
+		return "upstream", nil
+	}
+	if set["origin"] {
+		return "origin", nil
+	}
+	return "", fmt.Errorf("no usable remote found in %s (checked upstream, origin)", bareDir)
+}
+
+func prepareFixCICmd(pr github.PR, cfg *config.Config) tea.Cmd {
 	return func() tea.Msg {
 		ctx := context.Background()
 		owner, repo, err := parsePRRepo(pr.Repo)
@@ -291,23 +334,22 @@ func prepareFixCICmd(pr github.PR) tea.Cmd {
 		bareDir, wtDir := worktreePaths(owner, repo, pr.Number)
 
 		// Setup bare clone or fetch.
-		if _, err := os.Stat(bareDir); os.IsNotExist(err) {
-			if err := os.MkdirAll(filepath.Dir(bareDir), 0o755); err != nil {
-				return errMsg{err: fmt.Errorf("mkdir bare: %w", err)}
+		freshClone := false
+		if _, statErr := os.Stat(bareDir); os.IsNotExist(statErr) {
+			if err = cloneBareRepo(ctx, owner, repo, bareDir); err != nil {
+				return errMsg{err: err}
 			}
-			tokenOut, err := exec.CommandContext(ctx, "gh", "auth", "token").Output()
-			if err != nil {
-				return errMsg{err: fmt.Errorf("gh auth token: %w", err)}
-			}
-			token := strings.TrimSpace(string(tokenOut))
-			cloneURL := fmt.Sprintf("https://x-access-token:%s@github.com/%s/%s.git", token, owner, repo)
-			slog.Info("cloning bare repo", "repo", pr.Repo, "dir", bareDir)
-			if out, err := exec.CommandContext(ctx, "git", "clone", "--bare", cloneURL, bareDir).CombinedOutput(); err != nil {
-				return errMsg{err: fmt.Errorf("git clone --bare: %s: %w", out, err)}
-			}
-		} else {
-			slog.Info("fetching branch", "repo", pr.Repo, "branch", branch)
-			if out, err := exec.CommandContext(ctx, "git", "-C", bareDir, "fetch", "origin", branch).CombinedOutput(); err != nil {
+			freshClone = true
+		}
+
+		remote, err := resolveRemote(ctx, bareDir, cfg)
+		if err != nil {
+			return errMsg{err: err}
+		}
+
+		if !freshClone {
+			slog.Info("fetching branch", "repo", pr.Repo, "branch", branch, "remote", remote)
+			if out, err := exec.CommandContext(ctx, "git", "-C", bareDir, "fetch", remote, branch).CombinedOutput(); err != nil {
 				return errMsg{err: fmt.Errorf("git fetch: %s: %w", out, err)}
 			}
 		}
@@ -319,8 +361,8 @@ func prepareFixCICmd(pr github.PR) tea.Cmd {
 		}
 
 		// Create worktree.
-		slog.Info("creating worktree", "dir", wtDir, "branch", branch)
-		if out, err := exec.CommandContext(ctx, "git", "-C", bareDir, "worktree", "add", wtDir, "origin/"+branch).CombinedOutput(); err != nil {
+		slog.Info("creating worktree", "dir", wtDir, "branch", branch, "remote", remote)
+		if out, err := exec.CommandContext(ctx, "git", "-C", bareDir, "worktree", "add", wtDir, remote+"/"+branch).CombinedOutput(); err != nil {
 			return errMsg{err: fmt.Errorf("git worktree add: %s: %w", out, err)}
 		}
 
