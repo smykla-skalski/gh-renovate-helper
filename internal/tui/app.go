@@ -56,6 +56,7 @@ type Model struct {
 	cfg            *config.Config
 	cache          *cache.Cache
 	scheduledRepos map[string]bool
+	fetchingRepos  map[string]bool // repos with an in-flight network request
 	pendingCmd     tea.Cmd
 	status         string
 	labelInput     textinput.Model
@@ -83,7 +84,7 @@ func New(client *github.Client, cfg *config.Config, c *cache.Cache) Model {
 	cachedPRs := c.AllPRs()
 	if len(cachedPRs) > 0 {
 		list = list.SetPRs(cachedPRs)
-		list = list.SetStaleRepos(computeStaleRepos(c, cfg))
+		list = list.SetStaleRepos(computeSpinningRepos(c, cfg, nil))
 		loading = false
 	}
 
@@ -111,6 +112,7 @@ func New(client *github.Client, cfg *config.Config, c *cache.Cache) Model {
 		spinner:        s,
 		loading:        loading,
 		scheduledRepos: make(map[string]bool),
+		fetchingRepos:  make(map[string]bool),
 	}
 }
 
@@ -133,7 +135,7 @@ func (m Model) Init() tea.Cmd {
 
 	n := len(repos)
 	for i, repo := range repos {
-		cmds = append(cmds, scheduledRepoRefreshCmd(m.client, m.cfg, repo, initialRepoDelay(m.cache, repo, m.cfg, i, n)))
+		cmds = append(cmds, scheduledRepoRefreshCmd(repo, initialRepoDelay(m.cache, repo, m.cfg, i, n)))
 		m.scheduledRepos[repo] = true
 	}
 
@@ -191,6 +193,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return fetchPRsCmd(m.client, m.cfg)()
 		})
 
+	case repoFetchStartedMsg:
+		m.fetchingRepos[msg.repo] = true
+		m.list = m.list.SetStaleRepos(computeSpinningRepos(m.cache, m.cfg, m.fetchingRepos))
+		return m, fetchRepoPRsCmdWith(m.client, m.cfg, msg.repo)
+
 	case orgDiscoveredMsg:
 		now := msg.fetchedAt
 		var cmds []tea.Cmd
@@ -199,12 +206,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if !m.scheduledRepos[repo] {
 				m.scheduledRepos[repo] = true
 				jitter := time.Duration(rand.Int63n(int64(m.cfg.RefreshInterval)))
-				cmds = append(cmds, scheduledRepoRefreshCmd(m.client, m.cfg, repo, m.cfg.RefreshInterval+jitter))
+				cmds = append(cmds, scheduledRepoRefreshCmd(repo, m.cfg.RefreshInterval+jitter))
 			}
 		}
 		m.list = m.list.SetPRs(m.cache.AllPRs())
 		m.list = m.list.SetLoadingRepos(computeLoadingRepos(m.cache, m.scheduledRepos))
-		m.list = m.list.SetStaleRepos(computeStaleRepos(m.cache, m.cfg))
+		m.list = m.list.SetStaleRepos(computeSpinningRepos(m.cache, m.cfg, m.fetchingRepos))
 		if !m.loading {
 			m.lastFetch = now.UnixNano()
 		}
@@ -222,10 +229,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.loading = true
 		m.lastFetch = 0
 		m.scheduledRepos = make(map[string]bool)
+		m.fetchingRepos = make(map[string]bool)
 		var cmds []tea.Cmd
 		for i, repo := range m.cfg.Repos {
 			delay := time.Duration(i) * 200 * time.Millisecond
-			cmds = append(cmds, scheduledRepoRefreshCmd(m.client, m.cfg, repo, delay))
+			cmds = append(cmds, scheduledRepoRefreshCmd(repo, delay))
 			m.scheduledRepos[repo] = true
 		}
 		for i, org := range m.cfg.Orgs {
@@ -270,10 +278,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case repoPRsLoadedMsg:
+		delete(m.fetchingRepos, msg.repo)
 		m.cache.Set(msg.repo, msg.prs, msg.fetchedAt)
 		m.list = m.list.SetPRs(m.cache.AllPRs())
 		m.list = m.list.SetLoadingRepos(computeLoadingRepos(m.cache, m.scheduledRepos))
-		m.list = m.list.SetStaleRepos(computeStaleRepos(m.cache, m.cfg))
+		m.list = m.list.SetStaleRepos(computeSpinningRepos(m.cache, m.cfg, m.fetchingRepos))
 		m.lastFetch = msg.fetchedAt.UnixNano()
 		if m.loading {
 			m.loading = false
@@ -285,7 +294,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			slog.Error("cache save failed", "error", err)
 		}
 		jitter := time.Duration(rand.Int63n(int64(m.cfg.RefreshInterval / 5)))
-		return m, scheduledRepoRefreshCmd(m.client, m.cfg, msg.repo, m.cfg.RefreshInterval+jitter)
+		return m, scheduledRepoRefreshCmd(msg.repo, m.cfg.RefreshInterval+jitter)
 
 	case autoModeDoneMsg:
 		m.status = fmt.Sprintf("auto: approved %d, merged %d PRs", msg.approved, msg.merged)
@@ -405,7 +414,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		cmds := make([]tea.Cmd, 0, len(repos))
 		for i, repo := range repos {
 			delay := time.Duration(i) * 200 * time.Millisecond
-			cmds = append(cmds, scheduledRepoRefreshCmd(m.client, m.cfg, repo, delay))
+			cmds = append(cmds, scheduledRepoRefreshCmd(repo, delay))
 		}
 		return m, tea.Batch(cmds...)
 
@@ -688,16 +697,19 @@ func computeLoadingRepos(c *cache.Cache, scheduledRepos map[string]bool) map[str
 	return loading
 }
 
-// computeStaleRepos returns the set of repos whose cache entry is older than
-// cfg.CacheMaxAge. Used to drive the stale-row style in prlist.
-func computeStaleRepos(c *cache.Cache, cfg *config.Config) map[string]bool {
-	stale := make(map[string]bool)
+// computeSpinningRepos returns the set of repos that should show the spinner +
+// dim style: repos with an in-flight fetch OR repos with a stale cache entry.
+func computeSpinningRepos(c *cache.Cache, cfg *config.Config, fetching map[string]bool) map[string]bool {
+	spinning := make(map[string]bool)
 	for _, repo := range c.Repos() {
 		if c.IsStale(repo, cfg.CacheMaxAge) {
-			stale[repo] = true
+			spinning[repo] = true
 		}
 	}
-	return stale
+	for repo := range fetching {
+		spinning[repo] = true
+	}
+	return spinning
 }
 
 // initialRepoDelay computes how long to wait before fetching repo on startup.

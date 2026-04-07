@@ -95,17 +95,22 @@ func fetchRepoPRsCmdWith(f prFetcher, cfg *config.Config, repo string) tea.Cmd {
 	}
 }
 
-// scheduledRepoRefreshCmd sleeps `after`, then fetches a single repo's PRs.
-func scheduledRepoRefreshCmd(f prFetcher, cfg *config.Config, repo string, after time.Duration) tea.Cmd {
+// repoFetchStartedMsg is returned by scheduledRepoRefreshCmd after the sleep
+// delay expires. The app handles it by marking the repo as actively syncing
+// (spinner + dim) and firing the actual fetch command.
+type repoFetchStartedMsg struct {
+	repo string
+}
+
+// scheduledRepoRefreshCmd sleeps `after` then signals that a fetch is about to
+// start. The actual network call is fired from the repoFetchStartedMsg handler
+// so the UI can show the spinning indicator before the request begins.
+func scheduledRepoRefreshCmd(repo string, after time.Duration) tea.Cmd {
 	return func() tea.Msg {
 		if after > 0 {
 			time.Sleep(after)
 		}
-		prs, err := f.FetchRepoPRs(repo, cfg)
-		if err != nil {
-			return errMsg{err: fmt.Errorf("refresh %s: %w", repo, err)}
-		}
-		return repoPRsLoadedMsg{repo: repo, prs: prs, fetchedAt: time.Now()}
+		return repoFetchStartedMsg{repo: repo}
 	}
 }
 

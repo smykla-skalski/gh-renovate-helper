@@ -102,51 +102,16 @@ func TestRerunChecksCmd_InvalidRepo(t *testing.T) {
 
 // --- scheduledRepoRefreshCmd ---
 
-func TestScheduledRepoRefreshCmd_Success(t *testing.T) {
-	prs := []github.PR{{ID: "1", Repo: "owner/repo", Title: "Fix deps"}}
-	fetcher := &mockFetcher{repoPRs: map[string][]github.PR{"owner/repo": prs}}
-	cfg := &config.Config{}
-
-	before := time.Now()
-	cmd := scheduledRepoRefreshCmd(fetcher, cfg, "owner/repo", 0)
+func TestScheduledRepoRefreshCmd_ReturnsStartedMsg(t *testing.T) {
+	cmd := scheduledRepoRefreshCmd("owner/repo", 0)
 	msg := cmd()
-	after := time.Now()
 
-	m, ok := msg.(repoPRsLoadedMsg)
+	m, ok := msg.(repoFetchStartedMsg)
 	if !ok {
-		t.Fatalf("expected repoPRsLoadedMsg, got %T: %v", msg, msg)
+		t.Fatalf("expected repoFetchStartedMsg, got %T", msg)
 	}
 	if m.repo != "owner/repo" {
 		t.Errorf("repo: got %q, want %q", m.repo, "owner/repo")
-	}
-	if len(m.prs) != 1 {
-		t.Errorf("prs: got %d, want 1", len(m.prs))
-	}
-	if m.fetchedAt.IsZero() {
-		t.Error("fetchedAt should not be zero")
-	}
-	if m.fetchedAt.Before(before) || m.fetchedAt.After(after) {
-		t.Errorf("fetchedAt %v outside [%v, %v]", m.fetchedAt, before, after)
-	}
-}
-
-func TestScheduledRepoRefreshCmd_Error(t *testing.T) {
-	fetcher := &mockFetcher{repoErr: errors.New("network failure")}
-	cfg := &config.Config{}
-
-	cmd := scheduledRepoRefreshCmd(fetcher, cfg, "owner/repo", 0)
-	msg := cmd()
-
-	e, ok := msg.(errMsg)
-	if !ok {
-		t.Fatalf("expected errMsg, got %T", msg)
-	}
-	if e.err == nil {
-		t.Fatal("err should not be nil")
-	}
-	// Error should mention the repo name.
-	if !errors.Is(e.err, fetcher.repoErr) {
-		t.Logf("err: %v", e.err)
 	}
 }
 

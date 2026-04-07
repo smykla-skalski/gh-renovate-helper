@@ -68,42 +68,54 @@ func TestNew_ScheduledReposInitialized(t *testing.T) {
 	}
 }
 
-// --- computeStaleRepos ---
+// --- computeSpinningRepos ---
 
-func TestComputeStaleRepos_Fresh(t *testing.T) {
+func TestComputeSpinningRepos_Fresh(t *testing.T) {
 	c := cache.Empty()
 	c.Set("fresh/repo", nil, time.Now())
 	cfg := &config.Config{CacheMaxAge: 24 * time.Hour}
 
-	stale := computeStaleRepos(c, cfg)
-	if stale["fresh/repo"] {
-		t.Error("fresh/repo should not be in stale set")
+	spinning := computeSpinningRepos(c, cfg, nil)
+	if spinning["fresh/repo"] {
+		t.Error("fresh/repo should not be spinning")
 	}
 }
 
-func TestComputeStaleRepos_Stale(t *testing.T) {
+func TestComputeSpinningRepos_Stale(t *testing.T) {
 	c := cache.Empty()
 	c.Set("old/repo", nil, time.Now().Add(-25*time.Hour))
 	cfg := &config.Config{CacheMaxAge: 24 * time.Hour}
 
-	stale := computeStaleRepos(c, cfg)
-	if !stale["old/repo"] {
-		t.Error("old/repo should be in stale set")
+	spinning := computeSpinningRepos(c, cfg, nil)
+	if !spinning["old/repo"] {
+		t.Error("old/repo should be spinning (stale cache)")
 	}
 }
 
-func TestComputeStaleRepos_Mixed(t *testing.T) {
+func TestComputeSpinningRepos_Fetching(t *testing.T) {
+	c := cache.Empty()
+	c.Set("fresh/repo", nil, time.Now())
+	cfg := &config.Config{CacheMaxAge: 24 * time.Hour}
+	fetching := map[string]bool{"fresh/repo": true}
+
+	spinning := computeSpinningRepos(c, cfg, fetching)
+	if !spinning["fresh/repo"] {
+		t.Error("fresh/repo should be spinning (active fetch)")
+	}
+}
+
+func TestComputeSpinningRepos_Mixed(t *testing.T) {
 	c := cache.Empty()
 	c.Set("fresh/repo", nil, time.Now())
 	c.Set("stale/repo", nil, time.Now().Add(-25*time.Hour))
 	cfg := &config.Config{CacheMaxAge: 24 * time.Hour}
 
-	stale := computeStaleRepos(c, cfg)
-	if stale["fresh/repo"] {
-		t.Error("fresh/repo should not be stale")
+	spinning := computeSpinningRepos(c, cfg, nil)
+	if spinning["fresh/repo"] {
+		t.Error("fresh/repo should not be spinning")
 	}
-	if !stale["stale/repo"] {
-		t.Error("stale/repo should be stale")
+	if !spinning["stale/repo"] {
+		t.Error("stale/repo should be spinning")
 	}
 }
 
