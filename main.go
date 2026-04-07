@@ -9,6 +9,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/smykla-skalski/gh-renovate-helper/internal/cache"
 	"github.com/smykla-skalski/gh-renovate-helper/internal/config"
 	"github.com/smykla-skalski/gh-renovate-helper/internal/github"
 	"github.com/smykla-skalski/gh-renovate-helper/internal/tui"
@@ -28,6 +29,7 @@ func run() error {
 		author          = flag.String("author", "", "PR author (default: renovate[bot])")
 		mergeMethod     = flag.String("merge-method", "", "merge|squash|rebase")
 		refreshInterval = flag.Duration("refresh", 0, "refresh interval (e.g. 5m)")
+		cacheMaxAge     = flag.Duration("cache-max-age", 0, "max cache age before showing stale indicator (e.g. 24h)")
 		printOnly       = flag.Bool("print", false, "print PRs to stdout and exit")
 	)
 	flag.Parse()
@@ -59,6 +61,9 @@ func run() error {
 	if *refreshInterval != 0 {
 		cfg.RefreshInterval = *refreshInterval
 	}
+	if *cacheMaxAge != 0 {
+		cfg.CacheMaxAge = *cacheMaxAge
+	}
 
 	client, err := github.NewClient()
 	if err != nil {
@@ -66,7 +71,8 @@ func run() error {
 	}
 
 	if *printOnly {
-		prs, err := client.FetchPRs(cfg)
+		var prs []github.PR
+		prs, err = client.FetchPRs(cfg)
 		if err != nil {
 			return fmt.Errorf("fetch: %w", err)
 		}
@@ -77,7 +83,13 @@ func run() error {
 		return nil
 	}
 
-	p := tea.NewProgram(tui.New(client, cfg))
+	c, err := cache.Load()
+	if err != nil {
+		slog.Warn("failed to load cache, starting fresh", "error", err)
+		c = cache.Empty()
+	}
+
+	p := tea.NewProgram(tui.New(client, cfg, c))
 	if _, err := p.Run(); err != nil {
 		return fmt.Errorf("tui: %w", err)
 	}
