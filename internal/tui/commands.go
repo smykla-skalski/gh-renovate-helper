@@ -349,8 +349,9 @@ func prepareFixCICmd(pr github.PR, cfg *config.Config) tea.Cmd {
 			return errMsg{err: err}
 		}
 
-		// Always fetch: bare clones store branches in refs/heads/, not
-		// refs/remotes/<remote>/, so worktree add needs the tracking ref.
+		// Fetch the branch. In a bare repo the default refspec maps to
+		// refs/heads/*, not refs/remotes/<remote>/*, so the fetched branch
+		// lands at refs/heads/<branch> - use that ref for worktree add.
 		slog.Info("fetching branch", "repo", pr.Repo, "branch", branch, "remote", remote)
 		if out, err := exec.CommandContext(ctx, "git", "-C", bareDir, "fetch", remote, branch).CombinedOutput(); err != nil {
 			return errMsg{err: fmt.Errorf("git fetch: %s: %w", out, err)}
@@ -362,9 +363,10 @@ func prepareFixCICmd(pr github.PR, cfg *config.Config) tea.Cmd {
 			_ = os.RemoveAll(wtDir)
 		}
 
-		// Create worktree.
-		slog.Info("creating worktree", "dir", wtDir, "branch", branch, "remote", remote)
-		if out, err := exec.CommandContext(ctx, "git", "-C", bareDir, "worktree", "add", wtDir, remote+"/"+branch).CombinedOutput(); err != nil {
+		// Create worktree using the local ref (not remote/branch which
+		// doesn't exist in bare repos - there are no remote-tracking refs).
+		slog.Info("creating worktree", "dir", wtDir, "branch", branch)
+		if out, err := exec.CommandContext(ctx, "git", "-C", bareDir, "worktree", "add", wtDir, branch).CombinedOutput(); err != nil {
 			return errMsg{err: fmt.Errorf("git worktree add: %s: %w", out, err)}
 		}
 

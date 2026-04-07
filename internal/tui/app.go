@@ -77,7 +77,7 @@ func New(client *github.Client, cfg *config.Config) Model {
 		client:  client,
 		cfg:     cfg,
 		current: viewList,
-		list:    prlist.New(),
+		list:    prlist.New().SetRepoOrder(cfg.Repos, cfg.Orgs),
 		filter:  filter.New(),
 		help:    help.New(),
 		spinner: s,
