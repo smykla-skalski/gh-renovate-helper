@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"log/slog"
@@ -320,14 +321,17 @@ func prepareFixCICmd(pr github.PR, cfg *config.Config) tea.Cmd {
 		prKey := fmt.Sprintf("%s#%d", pr.Repo, pr.Number)
 
 		// Get PR branch name.
-		branchOut, err := exec.CommandContext(ctx, "gh", "pr", "view",
+		branchCmd := exec.CommandContext(ctx, "gh", "pr", "view",
 			strconv.Itoa(pr.Number),
 			"--repo", pr.Repo,
 			"--json", "headRefName",
 			"-q", ".headRefName",
-		).Output()
+		)
+		var branchStderr bytes.Buffer
+		branchCmd.Stderr = &branchStderr
+		branchOut, err := branchCmd.Output()
 		if err != nil {
-			return errMsg{err: fmt.Errorf("get PR branch: %w", err)}
+			return errMsg{err: fmt.Errorf("get PR branch: %w: %s", err, strings.TrimSpace(branchStderr.String()))}
 		}
 		branch := strings.TrimSpace(string(branchOut))
 
