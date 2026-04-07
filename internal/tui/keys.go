@@ -24,6 +24,7 @@ type keyMap struct {
 	Auto       key.Binding
 	Help       key.Binding
 	Quit       key.Binding
+	ClearCache key.Binding
 }
 
 var keys = keyMap{
@@ -48,4 +49,5 @@ var keys = keyMap{
 	Auto:       key.NewBinding(key.WithKeys("!"), key.WithHelp("!", "auto approve+merge")),
 	Help:       key.NewBinding(key.WithKeys("?"), key.WithHelp("?", "help")),
 	Quit:       key.NewBinding(key.WithKeys("q", "ctrl+c"), key.WithHelp("q", "quit")),
+	ClearCache: key.NewBinding(key.WithKeys("X"), key.WithHelp("X", "clear cache")),
 }

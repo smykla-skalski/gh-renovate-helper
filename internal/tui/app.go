@@ -2,6 +2,8 @@ package tui
 
 import (
 	"fmt"
+	"log/slog"
+	"math/rand"
 	"strings"
 	"time"
 
@@ -11,6 +13,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
+	"github.com/smykla-skalski/gh-renovate-helper/internal/cache"
 	"github.com/smykla-skalski/gh-renovate-helper/internal/config"
 	"github.com/smykla-skalski/gh-renovate-helper/internal/github"
 	"github.com/smykla-skalski/gh-renovate-helper/internal/tui/detail"
@@ -47,49 +50,116 @@ var (
 )
 
 type Model struct {
-	statusUntil   time.Time
-	help          help.Model
-	client        *github.Client
-	cfg           *config.Config
-	pendingCmd    tea.Cmd
-	status        string
-	labelInput    textinput.Model
-	spinner       spinner.Model
-	filter        filter.Model
-	labelPR       github.PR
-	list          prlist.Model
-	detail        detail.Model
-	lastFetch     int64
-	width         int
-	height        int
-	current       view
-	loading       bool
-	statusErr     bool
-	confirming    bool
-	confirmDanger bool
+	statusUntil    time.Time
+	help           help.Model
+	client         *github.Client
+	cfg            *config.Config
+	cache          *cache.Cache
+	scheduledRepos map[string]bool
+	fetchingRepos  map[string]bool // repos with an in-flight network request
+	pendingCmd     tea.Cmd
+	status         string
+	labelInput     textinput.Model
+	spinner        spinner.Model
+	filter         filter.Model
+	labelPR        github.PR
+	list           prlist.Model
+	detail         detail.Model
+	lastFetch      int64
+	width          int
+	height         int
+	current        view
+	loading        bool
+	statusErr      bool
+	confirming     bool
+	confirmDanger  bool
 }
 
-func New(client *github.Client, cfg *config.Config) Model {
+func New(client *github.Client, cfg *config.Config, c *cache.Cache) Model {
 	s := spinner.New()
 	s.Spinner = spinner.Dot
 
+	list := prlist.New().SetRepoOrder(cfg.Repos, cfg.Orgs)
+	loading := true
+	cachedPRs := c.AllPRs()
+	if len(cachedPRs) > 0 {
+		list = list.SetPRs(cachedPRs)
+		list = list.SetStaleRepos(computeSpinningRepos(c, cfg, nil))
+		loading = false
+	}
+
+	// Show repos from config that are not yet in cache as loading rows so the
+	// user sees all expected repos from the start.
+	initialLoading := make(map[string]bool)
+	for _, r := range cfg.Repos {
+		if _, ok := c.Get(r); !ok {
+			initialLoading[r] = true
+		}
+	}
+	if len(initialLoading) > 0 {
+		list = list.SetLoadingRepos(initialLoading)
+		loading = true
+	}
+
+	// Seed lastFetch from the most recent cache entry so the bottom bar shows
+	// "↻ X ago" immediately on warm start instead of "↻ syncing…".
+	var lastFetch int64
+	for _, repo := range c.Repos() {
+		if entry, ok := c.Get(repo); ok && entry.FetchedAt.UnixNano() > lastFetch {
+			lastFetch = entry.FetchedAt.UnixNano()
+		}
+	}
+
+	// Seed the spinner frame so the first render shows a glyph rather than a
+	// blank icon (spinner.TickMsg fires after the initial paint).
+	list = list.SetSpinnerFrame(s.View())
+
 	return Model{
-		client:  client,
-		cfg:     cfg,
-		current: viewList,
-		list:    prlist.New().SetRepoOrder(cfg.Repos, cfg.Orgs),
-		filter:  filter.New(),
-		help:    help.New(),
-		spinner: s,
-		loading: true,
+		client:         client,
+		cfg:            cfg,
+		cache:          c,
+		current:        viewList,
+		list:           list,
+		filter:         filter.New(),
+		help:           help.New(),
+		spinner:        s,
+		loading:        loading,
+		lastFetch:      lastFetch,
+		scheduledRepos: make(map[string]bool),
+		fetchingRepos:  make(map[string]bool),
 	}
 }
 
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(
-		fetchPRsCmd(m.client, m.cfg),
-		m.spinner.Tick,
-	)
+	cmds := []tea.Cmd{m.spinner.Tick}
+
+	// Collect all known repos (from cache + explicit cfg.Repos), deduplicated.
+	knownRepos := m.cache.Repos()
+	repoSet := make(map[string]bool, len(knownRepos)+len(m.cfg.Repos))
+	for _, r := range knownRepos {
+		repoSet[r] = true
+	}
+	for _, r := range m.cfg.Repos {
+		repoSet[r] = true
+	}
+	repos := make([]string, 0, len(repoSet))
+	for r := range repoSet {
+		repos = append(repos, r)
+	}
+
+	n := len(repos)
+	for i, repo := range repos {
+		cmds = append(cmds, scheduledRepoRefreshCmd(repo, initialRepoDelay(m.cache, repo, m.cfg, i, n)))
+		m.scheduledRepos[repo] = true
+	}
+
+	// Org discovery for finding new repos not yet in cache.
+	for i, org := range m.cfg.Orgs {
+		jitter := randomJitter(i, len(m.cfg.Orgs), m.cfg.RefreshInterval)
+		cmds = append(cmds, scheduledOrgDiscoverCmd(m.client, m.cfg, org, jitter))
+	}
+
+	return tea.Batch(cmds...)
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -137,6 +207,59 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return fetchPRsCmd(m.client, m.cfg)()
 		})
 
+	case repoFetchStartedMsg:
+		m.fetchingRepos[msg.repo] = true
+		m.list = m.list.SetStaleRepos(computeSpinningRepos(m.cache, m.cfg, m.fetchingRepos))
+		return m, fetchRepoPRsCmdWith(m.client, m.cfg, msg.repo)
+
+	case orgDiscoveredMsg:
+		now := msg.fetchedAt
+		var cmds []tea.Cmd
+		for repo, prs := range msg.reposPRs {
+			m.cache.Set(repo, prs, now)
+			if !m.scheduledRepos[repo] {
+				m.scheduledRepos[repo] = true
+				jitter := safeJitter(m.cfg.RefreshInterval)
+				cmds = append(cmds, scheduledRepoRefreshCmd(repo, m.cfg.RefreshInterval+jitter))
+			}
+		}
+		m.list = m.list.SetPRs(m.cache.AllPRs())
+		m.list = m.list.SetLoadingRepos(computeLoadingRepos(m.cache, m.scheduledRepos))
+		m.list = m.list.SetStaleRepos(computeSpinningRepos(m.cache, m.cfg, m.fetchingRepos))
+		// Always update lastFetch so the bottom bar shows "↻ X ago" and not
+		// "↻ syncing…" when org discovery is the first data to arrive on cold start.
+		m.lastFetch = now.UnixNano()
+		if err := m.cache.Save(); err != nil {
+			slog.Error("cache save failed", "error", err)
+		}
+		jitter := safeJitter(m.cfg.RefreshInterval / 4)
+		cmds = append(cmds, scheduledOrgDiscoverCmd(m.client, m.cfg, msg.org, m.cfg.RefreshInterval+jitter))
+		return m, tea.Batch(cmds...)
+
+	case cacheClearedMsg:
+		if err := m.cache.Clear(); err != nil {
+			slog.Error("cache clear failed", "error", err)
+		}
+		m.list = m.list.SetPRs([]github.PR{})
+		m.list = m.list.SetStaleRepos(nil)
+		m.loading = true
+		m.lastFetch = 0
+		m.scheduledRepos = make(map[string]bool)
+		m.fetchingRepos = make(map[string]bool)
+		var cmds []tea.Cmd
+		for i, repo := range m.cfg.Repos {
+			delay := time.Duration(i) * 200 * time.Millisecond
+			cmds = append(cmds, scheduledRepoRefreshCmd(repo, delay))
+			m.scheduledRepos[repo] = true
+		}
+		for i, org := range m.cfg.Orgs {
+			delay := time.Duration(i) * 300 * time.Millisecond
+			cmds = append(cmds, scheduledOrgDiscoverCmd(m.client, m.cfg, org, delay))
+		}
+		// All scheduled repos have no cache data - show them as loading rows.
+		m.list = m.list.SetLoadingRepos(computeLoadingRepos(m.cache, m.scheduledRepos))
+		return m, tea.Batch(cmds...)
+
 	case batchProgressMsg:
 		m.status = fmt.Sprintf("%s %d/%d: %s", msg.verb, msg.done, msg.total, msg.cur)
 		m.statusErr = false
@@ -171,20 +294,23 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case repoPRsLoadedMsg:
-		m.loading = false
-		existing := m.list.AllPRs()
-		merged := make([]github.PR, 0, len(existing))
-		for i := range existing {
-			if existing[i].Repo != msg.repo {
-				merged = append(merged, existing[i])
-			}
+		delete(m.fetchingRepos, msg.repo)
+		m.cache.Set(msg.repo, msg.prs, msg.fetchedAt)
+		m.list = m.list.SetPRs(m.cache.AllPRs())
+		m.list = m.list.SetLoadingRepos(computeLoadingRepos(m.cache, m.scheduledRepos))
+		m.list = m.list.SetStaleRepos(computeSpinningRepos(m.cache, m.cfg, m.fetchingRepos))
+		m.lastFetch = msg.fetchedAt.UnixNano()
+		if m.loading {
+			m.loading = false
 		}
-		merged = append(merged, msg.prs...)
-		m.list = m.list.SetPRs(merged)
 		if time.Now().After(m.statusUntil) {
-			m.status = fmt.Sprintf("%d PRs", len(merged))
+			m.status = fmt.Sprintf("%d PRs", len(m.cache.AllPRs()))
 		}
-		return m, nil
+		if err := m.cache.Save(); err != nil {
+			slog.Error("cache save failed", "error", err)
+		}
+		jitter := safeJitter(m.cfg.RefreshInterval / 5)
+		return m, scheduledRepoRefreshCmd(msg.repo, m.cfg.RefreshInterval+jitter)
 
 	case autoModeDoneMsg:
 		m.status = fmt.Sprintf("auto: approved %d, merged %d PRs", msg.approved, msg.merged)
@@ -219,6 +345,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case spinner.TickMsg:
 		var cmd tea.Cmd
 		m.spinner, cmd = m.spinner.Update(msg)
+		m.list = m.list.SetSpinnerFrame(m.spinner.View())
 		return m, cmd
 	}
 
@@ -234,6 +361,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch m.current {
 	case viewDetail:
 		if key.Matches(msg, keys.Quit) {
+			_ = m.cache.Save()
 			return m, tea.Quit
 		}
 		if key.Matches(msg, keys.Esc) {
@@ -276,6 +404,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// viewList.
 	switch {
 	case key.Matches(msg, keys.Quit):
+		_ = m.cache.Save()
 		return m, tea.Quit
 
 	case key.Matches(msg, keys.Esc):
@@ -292,8 +421,18 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case key.Matches(msg, keys.Refresh):
-		m.loading = true
-		return m, fetchPRsCmd(m.client, m.cfg)
+		repos := m.cache.Repos()
+		for _, r := range m.cfg.Repos {
+			if !m.scheduledRepos[r] {
+				repos = append(repos, r)
+			}
+		}
+		cmds := make([]tea.Cmd, 0, len(repos))
+		for i, repo := range repos {
+			delay := time.Duration(i) * 200 * time.Millisecond
+			cmds = append(cmds, scheduledRepoRefreshCmd(repo, delay))
+		}
+		return m, tea.Batch(cmds...)
 
 	case key.Matches(msg, keys.Enter):
 		if pr, ok := m.list.Selected(); ok {
@@ -389,6 +528,10 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			autoModeCmd(m.client, toApprove, toMerge, m.cfg.MergeMethod),
 		), nil
 
+	case key.Matches(msg, keys.ClearCache):
+		return m.startConfirm("Clear cache and re-fetch all? (y/n)",
+			func() tea.Msg { return cacheClearedMsg{} }), nil
+
 	case key.Matches(msg, keys.Label):
 		if pr, ok := m.list.Selected(); ok {
 			ti := textinput.New()
@@ -483,7 +626,7 @@ func (m Model) View() tea.View {
 		content = m.renderPopup()
 	case m.current == viewError:
 		content = m.renderErrorPopup()
-	case m.loading && m.lastFetch == 0:
+	case m.loading && m.lastFetch == 0 && len(m.cache.AllPRs()) == 0:
 		content = m.renderLoadingPopup()
 	}
 
@@ -554,6 +697,93 @@ func (m Model) renderErrorPopup() string {
 		lipgloss.WithWhitespaceChars(" "))
 }
 
+// computeLoadingRepos returns repos that are scheduled for refresh but have no
+// cache data yet. These show as spinner rows in the list from startup.
+func computeLoadingRepos(c *cache.Cache, scheduledRepos map[string]bool) map[string]bool {
+	cached := make(map[string]bool, len(c.Repos()))
+	for _, r := range c.Repos() {
+		cached[r] = true
+	}
+	loading := make(map[string]bool)
+	for r := range scheduledRepos {
+		if !cached[r] {
+			loading[r] = true
+		}
+	}
+	return loading
+}
+
+// computeSpinningRepos returns the set of repos that should show the spinner +
+// dim style: repos with an in-flight fetch OR repos with a stale cache entry.
+func computeSpinningRepos(c *cache.Cache, cfg *config.Config, fetching map[string]bool) map[string]bool {
+	spinning := make(map[string]bool)
+	for _, repo := range c.Repos() {
+		if c.IsStale(repo, cfg.CacheMaxAge) {
+			spinning[repo] = true
+		}
+	}
+	for repo := range fetching {
+		spinning[repo] = true
+	}
+	return spinning
+}
+
+// initialRepoDelay computes how long to wait before fetching repo on startup.
+// Stale or unknown repos refresh soon (small stagger). Fresh repos wait out
+// their remaining interval plus a random jitter.
+func initialRepoDelay(c *cache.Cache, repo string, cfg *config.Config, i, n int) time.Duration {
+	entry, ok := c.Get(repo)
+	if !ok || c.IsStale(repo, cfg.CacheMaxAge) {
+		if n <= 1 {
+			return 0
+		}
+		slot := cfg.RefreshInterval / time.Duration(n*4)
+		return time.Duration(i) * slot
+	}
+	age := time.Since(entry.FetchedAt)
+	remaining := cfg.RefreshInterval - age
+	if remaining < 0 {
+		remaining = 0
+	}
+	jitter := safeJitter(cfg.RefreshInterval / 5)
+	return remaining + jitter
+}
+
+// safeJitter returns a random duration in [0, bound). If bound <= 0, returns 0.
+func safeJitter(bound time.Duration) time.Duration {
+	if bound <= 0 {
+		return 0
+	}
+	return time.Duration(rand.Int63n(int64(bound)))
+}
+
+// randomJitter returns a stagger delay for slot i of n, spread across interval.
+func randomJitter(i, n int, interval time.Duration) time.Duration {
+	denom := n
+	if denom < 1 {
+		denom = 1
+	}
+	return time.Duration(i)*interval/time.Duration(denom) +
+		time.Duration(rand.Int63n(int64(interval/time.Duration(denom+1)+1)))
+}
+
+func formatAgo(d time.Duration) string {
+	switch {
+	case d < time.Minute:
+		return fmt.Sprintf("%ds", int(d.Seconds()))
+	case d < time.Hour:
+		return fmt.Sprintf("%dm", int(d.Minutes()))
+	case d < 24*time.Hour:
+		return fmt.Sprintf("%dh", int(d.Hours()))
+	case d < 30*24*time.Hour:
+		return fmt.Sprintf("%dd", int(d.Hours()/24))
+	case d < 365*24*time.Hour:
+		return fmt.Sprintf("%dmo", int(d.Hours()/24/30))
+	default:
+		return fmt.Sprintf("%dy", int(d.Hours()/24/365))
+	}
+}
+
 func truncateStyled(hints []string, sep string, maxWidth int) string {
 	ellipsis := styleDim.Render(" …")
 	for n := len(hints); n > 0; n-- {
@@ -587,6 +817,7 @@ func (m Model) renderBottomBar() string {
 			helpHint("/", "filter"),
 			helpHint("o", "open"),
 			helpHint("!", "auto"),
+			helpHint("X", "clear cache"),
 			helpHint("?", "help"),
 		}
 	case viewDetail:
@@ -623,8 +854,12 @@ func (m Model) renderBottomBar() string {
 	case m.status != "":
 		status = styleReady.Render("✓ " + m.status)
 	default:
-		ago := time.Since(time.Unix(0, m.lastFetch)).Round(time.Second)
-		status = styleDim.Render(fmt.Sprintf("↻ %s ago", ago))
+		if m.lastFetch == 0 {
+			status = styleDim.Render("↻ syncing…")
+		} else {
+			ago := time.Since(time.Unix(0, m.lastFetch))
+			status = styleDim.Render("↻ " + formatAgo(ago) + " ago")
+		}
 	}
 
 	pad := 2

@@ -8,6 +8,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/exp/golden"
 
+	"github.com/smykla-skalski/gh-renovate-helper/internal/cache"
 	"github.com/smykla-skalski/gh-renovate-helper/internal/config"
 	"github.com/smykla-skalski/gh-renovate-helper/internal/github"
 )
@@ -16,14 +17,332 @@ func newTestModel() Model {
 	cfg := &config.Config{
 		MergeMethod:     "squash",
 		RefreshInterval: 5 * time.Minute,
+		CacheMaxAge:     24 * time.Hour,
 	}
-	m := New(nil, cfg)
+	m := New(nil, cfg, cache.Empty())
 	m.list = m.list.SetPRs([]github.PR{
 		{ID: "1", Number: 10, Repo: "org/repo", Title: "update go"},
 		{ID: "2", Number: 20, Repo: "org/other", Title: "update helm"},
 	})
 	m.loading = false
 	return m
+}
+
+// --- New() with warm vs empty cache ---
+
+func TestNew_WarmCache_NotLoading(t *testing.T) {
+	c := cache.Empty()
+	prs := []github.PR{{ID: "1", Repo: "org/repo", Title: "PR"}}
+	c.Set("org/repo", prs, time.Now())
+
+	cfg := &config.Config{RefreshInterval: 5 * time.Minute, CacheMaxAge: 24 * time.Hour}
+	m := New(nil, cfg, c)
+
+	if m.loading {
+		t.Error("loading should be false with warm cache")
+	}
+	pr, ok := m.list.Selected()
+	if !ok {
+		t.Fatal("list should have PRs from cache")
+	}
+	if pr.Repo != "org/repo" {
+		t.Errorf("list PR repo = %q, want org/repo", pr.Repo)
+	}
+}
+
+func TestNew_EmptyCache_Loading(t *testing.T) {
+	cfg := &config.Config{RefreshInterval: 5 * time.Minute, CacheMaxAge: 24 * time.Hour}
+	m := New(nil, cfg, cache.Empty())
+
+	if !m.loading {
+		t.Error("loading should be true with empty cache")
+	}
+}
+
+func TestNew_ScheduledReposInitialized(t *testing.T) {
+	cfg := &config.Config{RefreshInterval: 5 * time.Minute, CacheMaxAge: 24 * time.Hour}
+	m := New(nil, cfg, cache.Empty())
+
+	if m.scheduledRepos == nil {
+		t.Error("scheduledRepos should be initialized")
+	}
+}
+
+// --- computeSpinningRepos ---
+
+func TestComputeSpinningRepos_Fresh(t *testing.T) {
+	c := cache.Empty()
+	c.Set("fresh/repo", nil, time.Now())
+	cfg := &config.Config{CacheMaxAge: 24 * time.Hour}
+
+	spinning := computeSpinningRepos(c, cfg, nil)
+	if spinning["fresh/repo"] {
+		t.Error("fresh/repo should not be spinning")
+	}
+}
+
+func TestComputeSpinningRepos_Stale(t *testing.T) {
+	c := cache.Empty()
+	c.Set("old/repo", nil, time.Now().Add(-25*time.Hour))
+	cfg := &config.Config{CacheMaxAge: 24 * time.Hour}
+
+	spinning := computeSpinningRepos(c, cfg, nil)
+	if !spinning["old/repo"] {
+		t.Error("old/repo should be spinning (stale cache)")
+	}
+}
+
+func TestComputeSpinningRepos_Fetching(t *testing.T) {
+	c := cache.Empty()
+	c.Set("fresh/repo", nil, time.Now())
+	cfg := &config.Config{CacheMaxAge: 24 * time.Hour}
+	fetching := map[string]bool{"fresh/repo": true}
+
+	spinning := computeSpinningRepos(c, cfg, fetching)
+	if !spinning["fresh/repo"] {
+		t.Error("fresh/repo should be spinning (active fetch)")
+	}
+}
+
+func TestComputeSpinningRepos_Mixed(t *testing.T) {
+	c := cache.Empty()
+	c.Set("fresh/repo", nil, time.Now())
+	c.Set("stale/repo", nil, time.Now().Add(-25*time.Hour))
+	cfg := &config.Config{CacheMaxAge: 24 * time.Hour}
+
+	spinning := computeSpinningRepos(c, cfg, nil)
+	if spinning["fresh/repo"] {
+		t.Error("fresh/repo should not be spinning")
+	}
+	if !spinning["stale/repo"] {
+		t.Error("stale/repo should be spinning")
+	}
+}
+
+// --- initialRepoDelay ---
+
+func TestInitialRepoDelay_StaleRepo_RefreshesSoon(t *testing.T) {
+	c := cache.Empty()
+	c.Set("org/repo", nil, time.Now().Add(-25*time.Hour)) // stale
+	cfg := &config.Config{RefreshInterval: 5 * time.Minute, CacheMaxAge: 24 * time.Hour}
+
+	delay := initialRepoDelay(c, "org/repo", cfg, 0, 1)
+	if delay > cfg.RefreshInterval/2 {
+		t.Errorf("stale repo delay too long: %v (max %v)", delay, cfg.RefreshInterval/2)
+	}
+}
+
+func TestInitialRepoDelay_UnknownRepo_RefreshesSoon(t *testing.T) {
+	c := cache.Empty()
+	cfg := &config.Config{RefreshInterval: 5 * time.Minute, CacheMaxAge: 24 * time.Hour}
+
+	delay := initialRepoDelay(c, "nobody/nowhere", cfg, 0, 1)
+	if delay > cfg.RefreshInterval/2 {
+		t.Errorf("unknown repo delay too long: %v", delay)
+	}
+}
+
+func TestInitialRepoDelay_FreshRepo_WaitsForInterval(t *testing.T) {
+	c := cache.Empty()
+	// Fetched 1 minute ago — 4 minutes remain before next interval.
+	c.Set("org/repo", nil, time.Now().Add(-1*time.Minute))
+	cfg := &config.Config{RefreshInterval: 5 * time.Minute, CacheMaxAge: 24 * time.Hour}
+
+	delay := initialRepoDelay(c, "org/repo", cfg, 0, 1)
+	// Should wait at least 3 minutes (remaining ~4m minus some jitter tolerance).
+	if delay < 3*time.Minute {
+		t.Errorf("fresh repo delay too short: %v (want ≥3m)", delay)
+	}
+}
+
+func TestInitialRepoDelay_MultipleRepos_Staggered(t *testing.T) {
+	c := cache.Empty()
+	c.Set("org/r1", nil, time.Now().Add(-25*time.Hour))
+	c.Set("org/r2", nil, time.Now().Add(-25*time.Hour))
+	cfg := &config.Config{RefreshInterval: 5 * time.Minute, CacheMaxAge: 24 * time.Hour}
+
+	d0 := initialRepoDelay(c, "org/r1", cfg, 0, 2)
+	d1 := initialRepoDelay(c, "org/r2", cfg, 1, 2)
+	// Second repo should have a larger base delay (i=1 vs i=0).
+	if d1 <= d0 {
+		t.Errorf("repo 2 delay (%v) should be > repo 1 delay (%v) for staggering", d1, d0)
+	}
+}
+
+// --- orgDiscoveredMsg handler ---
+
+func TestUpdate_OrgDiscoveredMsg_NewReposScheduled(t *testing.T) {
+	c := cache.EmptyAt(t.TempDir() + "/cache.json")
+	cfg := &config.Config{RefreshInterval: 5 * time.Minute, CacheMaxAge: 24 * time.Hour}
+	m := New(nil, cfg, c)
+
+	now := time.Now()
+	result, cmd := m.Update(orgDiscoveredMsg{
+		org: "myorg",
+		reposPRs: map[string][]github.PR{
+			"myorg/alpha": {{ID: "1", Repo: "myorg/alpha"}},
+			"myorg/beta":  {{ID: "2", Repo: "myorg/beta"}},
+		},
+		fetchedAt: now,
+	})
+	m = result.(Model)
+
+	// Cache updated.
+	if _, ok := c.Get("myorg/alpha"); !ok {
+		t.Error("cache should have myorg/alpha")
+	}
+	if _, ok := c.Get("myorg/beta"); !ok {
+		t.Error("cache should have myorg/beta")
+	}
+
+	// Both repos added to scheduled set.
+	if !m.scheduledRepos["myorg/alpha"] {
+		t.Error("myorg/alpha should be in scheduledRepos")
+	}
+	if !m.scheduledRepos["myorg/beta"] {
+		t.Error("myorg/beta should be in scheduledRepos")
+	}
+
+	// Cmd returned (re-discovery + per-repo schedules).
+	if cmd == nil {
+		t.Error("should return cmd after orgDiscoveredMsg")
+	}
+}
+
+func TestUpdate_OrgDiscoveredMsg_ExistingReposNotDuplicated(t *testing.T) {
+	c := cache.EmptyAt(t.TempDir() + "/cache.json")
+	cfg := &config.Config{RefreshInterval: 5 * time.Minute, CacheMaxAge: 24 * time.Hour}
+	m := New(nil, cfg, c)
+	// Pre-mark a repo as already scheduled.
+	m.scheduledRepos["myorg/existing"] = true
+
+	_, cmd := m.Update(orgDiscoveredMsg{
+		org: "myorg",
+		reposPRs: map[string][]github.PR{
+			"myorg/existing": {{ID: "1", Repo: "myorg/existing"}},
+		},
+		fetchedAt: time.Now(),
+	})
+
+	// We still expect a cmd (at minimum the re-discovery reschedule).
+	if cmd == nil {
+		t.Error("should still return cmd for re-discovery")
+	}
+	// The existing repo should remain scheduled (not duplicated).
+	if !m.scheduledRepos["myorg/existing"] {
+		t.Error("existing repo should remain in scheduledRepos")
+	}
+}
+
+// --- repoPRsLoadedMsg handler ---
+
+func TestUpdate_RepoPRsLoadedMsg_UpdatesCache(t *testing.T) {
+	c := cache.EmptyAt(t.TempDir() + "/cache.json")
+	cfg := &config.Config{RefreshInterval: 5 * time.Minute, CacheMaxAge: 24 * time.Hour}
+	m := New(nil, cfg, c)
+
+	fetchTime := time.Now()
+	prs := []github.PR{{ID: "1", Repo: "org/repo", Title: "bump"}}
+	result, cmd := m.Update(repoPRsLoadedMsg{
+		repo:      "org/repo",
+		prs:       prs,
+		fetchedAt: fetchTime,
+	})
+	m = result.(Model)
+
+	// Cache updated.
+	entry, ok := c.Get("org/repo")
+	if !ok {
+		t.Fatal("cache should have org/repo")
+	}
+	if len(entry.PRs) != 1 {
+		t.Errorf("cache PRs = %d, want 1", len(entry.PRs))
+	}
+
+	// loading cleared.
+	if m.loading {
+		t.Error("loading should be false after first repoPRsLoadedMsg")
+	}
+
+	// cmd returned (schedule next refresh for this repo).
+	if cmd == nil {
+		t.Error("should return cmd for next refresh")
+	}
+}
+
+func TestUpdate_RepoPRsLoadedMsg_ListReflectsMergedPRs(t *testing.T) {
+	c := cache.EmptyAt(t.TempDir() + "/cache.json")
+	// Pre-populate cache with another repo.
+	c.Set("org/other", []github.PR{{ID: "x", Repo: "org/other"}}, time.Now())
+	cfg := &config.Config{RefreshInterval: 5 * time.Minute, CacheMaxAge: 24 * time.Hour}
+	m := New(nil, cfg, c)
+
+	result, _ := m.Update(repoPRsLoadedMsg{
+		repo:      "org/repo",
+		prs:       []github.PR{{ID: "1", Repo: "org/repo"}},
+		fetchedAt: time.Now(),
+	})
+	m = result.(Model)
+
+	// List should show PRs from both repos.
+	all := m.list.AllPRs()
+	repos := make(map[string]bool)
+	for _, pr := range all {
+		repos[pr.Repo] = true
+	}
+	if !repos["org/repo"] {
+		t.Error("list should contain org/repo PRs")
+	}
+	if !repos["org/other"] {
+		t.Error("list should still contain org/other PRs")
+	}
+}
+
+// --- cacheClearedMsg handler ---
+
+func TestUpdate_CacheClearedMsg_ResetsState(t *testing.T) {
+	c := cache.EmptyAt(t.TempDir() + "/cache.json")
+	c.Set("org/repo", []github.PR{{ID: "1", Repo: "org/repo"}}, time.Now())
+	cfg := &config.Config{
+		RefreshInterval: 5 * time.Minute,
+		CacheMaxAge:     24 * time.Hour,
+		Repos:           []string{"org/repo"},
+	}
+	m := New(nil, cfg, c)
+
+	result, cmd := m.Update(cacheClearedMsg{})
+	m = result.(Model)
+
+	if len(m.cache.AllPRs()) != 0 {
+		t.Error("cache should be empty after cacheClearedMsg")
+	}
+	if len(m.list.AllPRs()) != 0 {
+		t.Error("list should be empty after cacheClearedMsg")
+	}
+	if !m.loading {
+		t.Error("loading should be true after cacheClearedMsg")
+	}
+	if m.lastFetch != 0 {
+		t.Error("lastFetch should be reset to 0")
+	}
+	if cmd == nil {
+		t.Error("should return refresh cmds after cacheClearedMsg")
+	}
+}
+
+func TestUpdate_CacheClearedMsg_ReschedulesOrgs(t *testing.T) {
+	c := cache.EmptyAt(t.TempDir() + "/cache.json")
+	cfg := &config.Config{
+		RefreshInterval: 5 * time.Minute,
+		CacheMaxAge:     24 * time.Hour,
+		Orgs:            []string{"myorg"},
+	}
+	m := New(nil, cfg, c)
+
+	_, cmd := m.Update(cacheClearedMsg{})
+	if cmd == nil {
+		t.Error("should return cmd including org discovery after cacheClearedMsg")
+	}
 }
 
 func TestStartConfirm(t *testing.T) {
