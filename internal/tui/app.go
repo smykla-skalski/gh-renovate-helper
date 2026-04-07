@@ -366,7 +366,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			return m.startConfirm(
 				fmt.Sprintf("Fix CI for %s#%d? (y/n)", pr.Repo, pr.Number),
-				prepareFixCICmd(pr),
+				prepareFixCICmd(pr, m.cfg),
 			), nil
 		}
 		return m, nil
