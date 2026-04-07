@@ -16,6 +16,7 @@ type Config struct {
 	Repos           []string      `yaml:"repos"`
 	ExcludeRepos    []string      `yaml:"exclude_repos"`
 	RefreshInterval time.Duration `yaml:"refresh_interval"`
+	CacheMaxAge     time.Duration `yaml:"cache_max_age"`
 }
 
 func defaults() Config {
@@ -23,6 +24,7 @@ func defaults() Config {
 		Author:          "renovate[bot]",
 		MergeMethod:     "squash",
 		RefreshInterval: 5 * time.Minute,
+		CacheMaxAge:     24 * time.Hour,
 	}
 }
 
@@ -54,6 +56,9 @@ func Load() (*Config, error) {
 	}
 	if cfg.RefreshInterval == 0 {
 		cfg.RefreshInterval = 5 * time.Minute
+	}
+	if cfg.CacheMaxAge == 0 {
+		cfg.CacheMaxAge = 24 * time.Hour
 	}
 
 	return &cfg, nil

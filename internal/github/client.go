@@ -155,6 +155,35 @@ func (c *Client) FetchRepoPRs(repo string, cfg *config.Config) ([]PR, error) {
 	return prs, nil
 }
 
+// FetchScopePRs fetches all open Renovate PRs for a single scope string, which
+// is either "org:name" or "repo:owner/name". Excluded repos are filtered out.
+func (c *Client) FetchScopePRs(scope string, cfg *config.Config) ([]PR, error) {
+	slog.Debug("fetching PRs for scope", "scope", scope)
+	excluded := make(map[string]bool, len(cfg.ExcludeRepos))
+	for _, r := range cfg.ExcludeRepos {
+		excluded[r] = true
+	}
+	query := buildSingleSearchQuery(scope, cfg.Author)
+	var result map[string]searchResult
+	if err := c.doWithRetry(query, nil, &result); err != nil {
+		slog.Error("graphql scope fetch failed", "scope", scope, "error", err)
+		return nil, err
+	}
+	res, ok := result["result"]
+	if !ok {
+		return nil, nil
+	}
+	prs := make([]PR, 0, len(res.Nodes))
+	for i := range res.Nodes {
+		pr := convertNode(&res.Nodes[i])
+		if !excluded[pr.Repo] {
+			prs = append(prs, pr)
+		}
+	}
+	slog.Info("fetched scope PRs", "scope", scope, "count", len(prs))
+	return prs, nil
+}
+
 func buildSingleSearchQuery(scope, author string) string {
 	q := fmt.Sprintf("%s author:%s is:pr is:open", scope, author)
 	return fmt.Sprintf("query {\n  result: search(query: %q, type: ISSUE, first: 100) { ...prFields }\n}\n%s", q, prFragment)
